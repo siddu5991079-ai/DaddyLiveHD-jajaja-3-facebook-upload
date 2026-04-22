@@ -27,7 +27,7 @@ on:
       target_url:
         description: 'Target Website URL'
         required: true
-        default: 'https://dadocric.st/player.php?id=starsp'
+        default: 'https://dlstreams.com/watch.php?id=316'
 
 jobs:
   run-bot:
@@ -49,8 +49,7 @@ jobs:
         node-version: '18'
 
     - name: Install Node Libraries
-      # 🚀 NAYA: puppeteer-extra aur stealth plugin add kiya hai
-      run: npm install puppeteer puppeteer-extra puppeteer-extra-plugin-stealth axios form-data
+      run: npm install puppeteer puppeteer-extra puppeteer-extra-plugin-stealth puppeteer-screen-recorder axios form-data
 
     - name: Start The Hybrid Bot
       env:
@@ -58,6 +57,7 @@ jobs:
         FB_TOKEN_2: ${{ secrets.FB_TOKEN_2 }}
         TOKEN_SELECTION: ${{ inputs.token_selection }}
         GH_PAT: ${{ secrets.GH_PAT }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Debug video upload ke liye zaroori hai
         TITLES_LIST: ${{ inputs.titles_list }}
         DESCS_LIST: ${{ inputs.descs_list }}
         HASHTAGS: ${{ inputs.hashtags }}
