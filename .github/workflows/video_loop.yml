@@ -10,7 +10,7 @@ on:
         options:
           - 'Token1'
           - 'Token2'
-          - 'Token3'
+          - 'Dual'
         default: 'Dual'
       titles_list:
         description: 'Titles Array (Separate with ,,)'
@@ -38,10 +38,10 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v3
 
-    - name: Install System Tools (FFmpeg & Chrome)
+    - name: Install System Tools (FFmpeg, Chrome, PulseAudio)
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg google-chrome-stable xvfb
+        sudo apt-get install -y ffmpeg google-chrome-stable xvfb pulseaudio dbus-x11
 
     - name: Setup Node.js
       uses: actions/setup-node@v3
@@ -49,14 +49,14 @@ jobs:
         node-version: '18'
 
     - name: Install Node Libraries
-      run: npm install puppeteer axios form-data
+      # 🚀 NAYA: puppeteer-extra aur stealth plugin add kiya hai
+      run: npm install puppeteer puppeteer-extra puppeteer-extra-plugin-stealth axios form-data
 
     - name: Start The Hybrid Bot
       env:
         FB_TOKEN_1: ${{ secrets.FB_TOKEN_1 }}
         FB_TOKEN_2: ${{ secrets.FB_TOKEN_2 }}
-        FB_TOKEN_3: ${{ secrets.FB_TOKEN_3 }}
-        TOKEN_SELECTION: ${{ inputs.token_selection }} # 🎯 Yahan se selection script mein jayegi
+        TOKEN_SELECTION: ${{ inputs.token_selection }}
         GH_PAT: ${{ secrets.GH_PAT }}
         TITLES_LIST: ${{ inputs.titles_list }}
         DESCS_LIST: ${{ inputs.descs_list }}
@@ -64,4 +64,12 @@ jobs:
         TARGET_URL: ${{ inputs.target_url }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         GITHUB_REF_NAME: ${{ github.ref_name }}
-      run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" node video_bot.js
+      run: |
+        # 🔊 PulseAudio Server setup (FFmpeg Fake Audio Capture ke liye zaroori)
+        pulseaudio -D --exit-idle-time=-1
+        pacmd load-module module-virtual-sink sink_name=v1
+        pacmd set-default-sink v1
+        pacmd set-default-source v1.monitor
+        
+        # 🎥 Xvfb screen resolution 1280x720 set ki hai taake video size perfect rahay
+        xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node video_bot.js
