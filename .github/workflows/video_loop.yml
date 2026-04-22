@@ -10,6 +10,7 @@ on:
         options:
           - 'Token1'
           - 'Token2'
+          - 'Token3'
         default: 'Dual'
       titles_list:
         description: 'Titles Array (Separate with ,,)'
@@ -54,6 +55,7 @@ jobs:
       env:
         FB_TOKEN_1: ${{ secrets.FB_TOKEN_1 }}
         FB_TOKEN_2: ${{ secrets.FB_TOKEN_2 }}
+        FB_TOKEN_3: ${{ secrets.FB_TOKEN_3 }}
         TOKEN_SELECTION: ${{ inputs.token_selection }} # 🎯 Yahan se selection script mein jayegi
         GH_PAT: ${{ secrets.GH_PAT }}
         TITLES_LIST: ${{ inputs.titles_list }}
