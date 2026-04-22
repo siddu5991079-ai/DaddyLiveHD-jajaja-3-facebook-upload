@@ -32,7 +32,6 @@ let clipCounter = 1;
 let browser = null;
 let page = null;
 let targetFrame = null;
-const DISPLAY_NUM = process.env.DISPLAY || ':99';
 
 function formatPKT(timestampMs = Date.now()) {
     return new Date(timestampMs).toLocaleString('en-US', {
@@ -79,7 +78,7 @@ async function initBrowserAndPlayer(isFirstCycle) {
 
     console.log(`[*] Navigating to target URL: ${TARGET_URL}...`);
     await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await new Promise(r => setTimeout(r, 10000)); // Cloudflare bypass wait
+    await new Promise(r => setTimeout(r, 10000)); 
 
     console.log('[*] Scanning iframes for the REAL Live Stream Video...');
     for (const frame of page.frames()) {
@@ -123,7 +122,6 @@ async function initBrowserAndPlayer(isFirstCycle) {
 
     console.log('[✅] Browser Ready! Video is playing fullscreen.');
 
-    // 🎥 DEBUG RECORDING
     if (isFirstCycle) {
         console.log(`\n[🔍 DEBUG] Cycle 1 par 15-second ki Visual Debug Recording kar raha hoon...`);
         const recorder = new PuppeteerScreenRecorder(page);
@@ -138,9 +136,7 @@ async function initBrowserAndPlayer(isFirstCycle) {
             const tagName = `visual-debug-${Date.now()}`;
             execSync(`gh release create ${tagName} ${debugFileName} --title "Visual Debug Capture" --notes "First Cycle Screen Check"`, { stdio: 'inherit' });
             console.log('✅ [+] Successfully uploaded visual debug video to GitHub Releases!');
-        } catch (err) {
-            console.error('❌ [!] Failed to upload debug video:', err.message);
-        }
+        } catch (err) {}
         if (fs.existsSync(debugFileName)) fs.unlinkSync(debugFileName);
     }
 }
@@ -171,35 +167,8 @@ async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
 }
 
 // ==========================================
-// 🛠️ ASYNC FFMPEG RECORD & EDIT
+// 🛠️ ASYNC FFMPEG EXECUTOR 
 // ==========================================
-async function runFFmpegRecordAsync(args, stepName) {
-    return new Promise((resolve) => {
-        const ffmpegProc = spawn('ffmpeg', args);
-        let lastLogTime = Date.now();
-
-        ffmpegProc.stderr.on('data', (data) => {
-            const output = data.toString().trim();
-            if (Date.now() - lastLogTime > 2000) {
-                if (output.includes('time=')) console.log(`[FFmpeg ${stepName}]: ${output.substring(0, 100)}...`);
-                lastLogTime = Date.now();
-            }
-        });
-
-        const stopTimer = setTimeout(() => {
-            console.log(`[⏱️] 12 Seconds passed. Forcing FFmpeg to stop recording gracefully...`);
-            try { ffmpegProc.stdin.write('q\n'); } catch (e) {}
-            setTimeout(() => { try { ffmpegProc.kill('SIGKILL'); } catch(e){} }, 3000);
-        }, 12000);
-
-        ffmpegProc.on('close', (code) => {
-            clearTimeout(stopTimer);
-            console.log(`[✅] ${stepName} Completed!`);
-            resolve(true);
-        });
-    });
-}
-
 async function runFFmpegEditAsync(args, stepName) {
     return new Promise((resolve) => {
         const ffmpegProc = spawn('ffmpeg', args);
@@ -221,71 +190,73 @@ async function runFFmpegEditAsync(args, stepName) {
 }
 
 // ==========================================
-// 🎥 WORKER 1 & 2: SCREEN RECORDING + EDIT (SPEED FIX APPLIED)
+// 🎥 WORKER 1 & 2: THE NEW FLAWLESS CAPTURE & EDIT
 // ==========================================
 async function worker_1_2_capture_and_edit(outputVid) {
-    console.log(`\n[🎬 Worker 1 & 2] Physical Screen Recording & Fast Edit shuru ho raha hai...`);
+    console.log(`\n[🎬 Worker 1 & 2] Puppeteer Recording & Fast Edit shuru ho raha hai...`);
     const audioFile = "marya_live.mp3"; const bgImage = "website_frame.png"; const staticVideo = "main_video.mp4"; 
-    const duration = "10"; const blurAmount = "15:3"; 
+    const blurAmount = "15:3"; 
     
     const hasBg = fs.existsSync(bgImage); const hasAudio = fs.existsSync(audioFile); const hasMainVideo = fs.existsSync(staticVideo);
     const raw10sVid = `raw_screen_${Date.now()}.mp4`; const tempDynVideo = `temp_dyn_${Date.now()}.mp4`; 
 
     // ----------------------------------------
-    // STEP 0: RECORD 10 SECONDS
+    // 🚀 STEP 0: THE MAGIC FIX - RECORD USING PUPPETEER (NO HANG)
     // ----------------------------------------
-    console.log(`\n[>] [Step 0] Recording 10 seconds of LIVE Fullscreen (x11grab)...`);
-    // 🚀 FIX: Audio capture parameters improved to avoid drift
-    const captureArgs = ['-y', '-f', 'x11grab', '-draw_mouse', '0', '-video_size', '1280x720', '-framerate', '30', '-i', DISPLAY_NUM, '-f', 'pulse', '-i', 'default', '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '2', '-c:a', 'aac', '-t', duration, raw10sVid];
-    
-    const recordSuccess = await runFFmpegRecordAsync(captureArgs, "Screen Capture");
-    if (!fs.existsSync(raw10sVid) || fs.statSync(raw10sVid).size < 1000) {
-        console.log(`[❌] Screen recording fail ho gayi. File nahi bani.`); return false;
+    console.log(`\n[>] [Step 0] Recording 10 seconds of LIVE Fullscreen using Puppeteer...`);
+    try {
+        const recorder = new PuppeteerScreenRecorder(page, { fps: 30 });
+        await recorder.start(raw10sVid);
+        await new Promise(r => setTimeout(r, 10000)); // Exactly 10 seconds wait
+        await recorder.stop();
+        console.log(`[✅] Step 0 Done! Smooth 10s video captured.`);
+    } catch (e) {
+        console.log(`[❌] Puppeteer recording failed: ${e.message}`);
+        return false;
     }
 
+    if (!fs.existsSync(raw10sVid) || fs.statSync(raw10sVid).size < 1000) return false;
+
+    // 🔴 ECO-MODE: Browser band kar do kyunki video record ho chuki hai
     console.log(`[🧹 ECO-MODE] Screen capture done. Closing browser to free up RAM before heavy processing...`);
     await cleanup(); 
 
     // ----------------------------------------
-    // STEP A: EDIT CLIP (Blur & PiP) - SPEED SYNC FIX
+    // STEP A: EDIT CLIP (Blur & PiP + Audio)
     // ----------------------------------------
-    console.log(`\n[>] [Step A] Applying Blur & PiP Frame on recorded clip (Syncing Framerates)...`);
+    console.log(`\n[>] [Step A] Applying Blur & PiP Frame on recorded clip...`);
     let args1 = ["-y", "-thread_queue_size", "1024", "-i", raw10sVid]; 
     if (hasBg) args1.push("-thread_queue_size", "1024", "-loop", "1", "-framerate", "30", "-i", bgImage);
-    if (hasAudio) args1.push("-thread_queue_size", "1024", "-stream_loop", "-1", "-i", audioFile);
     
-    // 🚀 FIX: `setpts=PTS-STARTPTS` add kiya taake video start se proper time par chale aur fast na ho. `fps=30` fix kiya.
+    // Yahan hum marya_live.mp3 attach kar rahe hain
+    if (hasAudio) args1.push("-thread_queue_size", "1024", "-i", audioFile);
+    
     let filterComplex1 = hasBg 
-        ? `[0:v]setpts=PTS-STARTPTS,fps=30,scale=1064:565,boxblur=${blurAmount}[pip]; [1:v]setpts=PTS-STARTPTS,fps=30[bg]; [bg][pip]overlay=0:250:shortest=1,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]` 
-        : `[0:v]setpts=PTS-STARTPTS,fps=30,scale=1280:720,boxblur=${blurAmount},format=yuv420p[outv]`;
+        ? `[0:v]scale=1064:565,boxblur=${blurAmount}[pip]; [1:v][bg]; [bg][pip]overlay=0:250:shortest=1,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]` 
+        : `[0:v]scale=1280:720,boxblur=${blurAmount},format=yuv420p[outv]`;
         
     args1.push("-filter_complex", filterComplex1, "-map", "[outv]");
     
     if (hasAudio) {
         let audioIndex = hasBg ? 2 : 1;
-        // 🚀 FIX: Audio ko bhi start se sync kiya
+        // Audio filter: Sirf itni audio use karo jitni video ki length hai (-shortest)
         args1.push("-map", `${audioIndex}:a:0`, "-af", "aresample=async=1");
-    } else {
-        args1.push("-map", "0:a:0", "-af", "aresample=async=1");
     }
     
-    // 🚀 FIX: `-vsync 1` aur strict time limit.
-    args1.push("-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-vsync", "1", "-c:a", "aac", "-b:a", "128k", "-t", duration, tempDynVideo);
+    // '-shortest' tag ensure karega ke jaise hi 10s video khatam ho, mp3 audio bhi cut ho jaye aur processing ruk jaye
+    args1.push("-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-c:a", "aac", "-b:a", "128k", "-shortest", tempDynVideo);
 
     const editSuccess = await runFFmpegEditAsync(args1, "Apply Filters");
     if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid); 
     
-    if (!editSuccess || !fs.existsSync(tempDynVideo)) {
-        console.log(`[❌] Edit step failed.`); return false;
-    }
+    if (!editSuccess || !fs.existsSync(tempDynVideo)) return false;
 
     // ----------------------------------------
-    // STEP B: MERGE - SPEED SYNC FIX
+    // STEP B: MERGE
     // ----------------------------------------
     if (hasMainVideo) {
         console.log(`\n[>] [Step B] Merging with 'main_video.mp4'...`);
-        // 🚀 FIX: Added fps normalization during merge
-        let args2 = ["-y", "-i", tempDynVideo, "-i", staticVideo, "-filter_complex", "[0:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v0]; [0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0]; [1:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v1]; [1:a]aformat=sample_rates=44100:channel_layouts=stereo[a1]; [v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]", "-map", "[outv]", "-map", "[outa]", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-vsync", "1", "-c:a", "aac", "-b:a", "128k", outputVid];
+        let args2 = ["-y", "-i", tempDynVideo, "-i", staticVideo, "-filter_complex", "[0:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v0]; [0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0]; [1:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v1]; [1:a]aformat=sample_rates=44100:channel_layouts=stereo[a1]; [v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]", "-map", "[outv]", "-map", "[outa]", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-c:a", "aac", "-b:a", "128k", outputVid];
         
         const mergeSuccess = await runFFmpegEditAsync(args2, "Merge Video");
         fs.unlinkSync(tempDynVideo); 
@@ -337,7 +308,7 @@ async function triggerNextRun() {
 
 async function main() {
     console.log("\n==================================================");
-    console.log(`   🚀 HYBRID SCREEN-RECORDING BOT (ECO-MODE + ASYNC)`);
+    console.log(`   🚀 HYBRID BOT (PUPPETEER RECORDING FIXED)`);
     console.log(`   ⏰ STARTED AT: ${formatPKT()}`);
     console.log("==================================================");
 
@@ -377,7 +348,6 @@ async function main() {
 }
 
 main();
-
 
 
 
