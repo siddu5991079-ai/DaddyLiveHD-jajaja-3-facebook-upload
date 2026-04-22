@@ -10,7 +10,7 @@ const axios = require('axios');
 // ==========================================
 // ⚙️ SETTINGS & ENVIRONMENT VARIABLES
 // ==========================================
-const TARGET_URL = process.env.TARGET_URL || 'https://dadocric.st/player.php?id=ptvsp';
+const TARGET_URL = process.env.TARGET_URL || 'https://dlstreams.com/watch.php?id=316';
 
 // 🔑 DUAL FACEBOOK TOKENS
 const FB_TOKEN_1 = process.env.FB_TOKEN_1 || '';
@@ -157,7 +157,6 @@ async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
     console.log(`\n[🎨 Worker 0.5] Puppeteer se Live Screen ka HD Thumbnail bana raha hoon...`);
     const rawFrame = 'temp_raw_frame.jpg';
     try {
-        // Direct screenshot from the running browser!
         await page.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
     } catch (e) { return false; }
 
@@ -217,7 +216,7 @@ async function worker_1_2_capture_and_edit(outputVid) {
     // -----------------------------------------------------
     // STEP 0: RECORD 10 SECONDS LIVE FROM VIRTUAL SCREEN
     // -----------------------------------------------------
-    console.log(`[>] Recording 10 seconds of LIVE screen (x11grab)...`);
+    console.log(`[>] [Step 0] Recording 10 seconds of LIVE Fullscreen (x11grab)... (Wait 10-12s)`);
     const captureArgs = [
         '-y', '-f', 'x11grab', '-draw_mouse', '0', '-video_size', '1280x720', '-framerate', '30', '-i', DISPLAY_NUM,
         '-f', 'pulse', '-i', 'default', // Capturing audio from pulseaudio
@@ -225,18 +224,25 @@ async function worker_1_2_capture_and_edit(outputVid) {
         raw10sVid
     ];
     
-    spawnSync('ffmpeg', captureArgs, { stdio: 'ignore' });
+    // Timeout added just in case x11grab hangs (timeout 20s)
+    const recResult = spawnSync('ffmpeg', captureArgs, { stdio: 'pipe', timeout: 20000 });
     
-    if (!fs.existsSync(raw10sVid) || fs.statSync(raw10sVid).size < 1000) {
-        console.log(`[❌] Screen recording fail ho gayi. File nahi bani.`);
+    if (recResult.error) {
+        console.log(`[❌] Step 0 Timeout/Error: ${recResult.error.message}`);
         return false;
     }
+
+    if (!fs.existsSync(raw10sVid) || fs.statSync(raw10sVid).size < 1000) {
+        console.log(`[❌] Screen recording fail ho gayi. File nahi bani ya khali hai. Logs:\n${recResult.stderr.toString().substring(0, 500)}`);
+        return false;
+    }
+    console.log(`[✅] Step 0 Done! Raw screen recorded: ${fs.statSync(raw10sVid).size / 1024} KB`);
 
     // -----------------------------------------------------
     // STEP A: Apply Blur & PiP (Using Recorded Clip as Input)
     // -----------------------------------------------------
-    console.log(`[>] Step A: Applying Blur & PiP Frame on recorded clip...`);
-    let args1 = ["-y", "-thread_queue_size", "1024", "-i", raw10sVid]; // Using our fresh 10s recording!
+    console.log(`[>] [Step A] Applying Blur & PiP Frame on recorded clip... (Processing...)`);
+    let args1 = ["-y", "-thread_queue_size", "1024", "-i", raw10sVid]; 
 
     if (hasBg) {
         args1.push("-thread_queue_size", "1024", "-loop", "1", "-framerate", "30", "-i", bgImage);
@@ -263,7 +269,15 @@ async function worker_1_2_capture_and_edit(outputVid) {
 
     args1.push("-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", tempDynVideo);
 
-    spawnSync('ffmpeg', args1, { stdio: 'ignore' });
+    // Timeout added (40s) aur Stdio pipe kiya error dekhne ke liye
+    const editResult = spawnSync('ffmpeg', args1, { stdio: 'pipe', timeout: 40000 });
+    
+    if (editResult.error) {
+        console.log(`[❌] Step A Timeout/Error: ${editResult.error.message}`);
+    } else if (editResult.status !== 0) {
+        console.log(`[❌] Step A FFmpeg Error:\n${editResult.stderr.toString().substring(0, 500)}`);
+    }
+
     if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid); // Cleanup raw clip
 
     if (fs.existsSync(tempDynVideo) && fs.statSync(tempDynVideo).size > 1000) {
@@ -273,7 +287,7 @@ async function worker_1_2_capture_and_edit(outputVid) {
         // STEP B: Merge with main_video.mp4
         // -----------------------------------------------------
         if (hasMainVideo) {
-            console.log(`[>] Step B: Merging with 'main_video.mp4'...`);
+            console.log(`[>] [Step B] Merging with 'main_video.mp4'... (Processing...)`);
             let args2 = [
                 "-y", "-i", tempDynVideo, "-i", staticVideo,
                 "-filter_complex",
@@ -282,7 +296,12 @@ async function worker_1_2_capture_and_edit(outputVid) {
                 "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", outputVid
             ];
             
-            spawnSync('ffmpeg', args2, { stdio: 'ignore' });
+            const mergeResult = spawnSync('ffmpeg', args2, { stdio: 'pipe', timeout: 60000 });
+            
+            if (mergeResult.error || mergeResult.status !== 0) {
+                 console.log(`[❌] Step B Error:\n${mergeResult.stderr ? mergeResult.stderr.toString().substring(0, 300) : mergeResult.error.message}`);
+            }
+
             fs.unlinkSync(tempDynVideo); 
             
             if (fs.existsSync(outputVid) && fs.statSync(outputVid).size > 1000) {
@@ -296,6 +315,8 @@ async function worker_1_2_capture_and_edit(outputVid) {
             fs.renameSync(tempDynVideo, outputVid); 
             return true;
         }
+    } else {
+        console.log(`[❌] Step A mein Output file nahi bani.`);
     }
     return false;
 }
