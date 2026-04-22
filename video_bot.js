@@ -2,7 +2,7 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 
-const { spawnSync, execSync } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const FormData = require('form-data');
 const axios = require('axios'); 
@@ -139,7 +139,7 @@ async function initBrowserAndPlayer(isFirstCycle) {
             execSync(`gh release create ${tagName} ${debugFileName} --title "Visual Debug Capture" --notes "First Cycle Screen Check"`, { stdio: 'inherit' });
             console.log('✅ [+] Successfully uploaded visual debug video to GitHub Releases!');
         } catch (err) {
-            console.error('❌ [!] Failed to upload debug video (Check GH_TOKEN in yaml):', err.message);
+            console.error('❌ [!] Failed to upload debug video (Check gh release permissions):', err.message);
         }
         if (fs.existsSync(debugFileName)) fs.unlinkSync(debugFileName);
     }
@@ -171,42 +171,96 @@ async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
 }
 
 // ==========================================
+// 🛠️ ASYNC FFMPEG EXECUTOR (Buffer Freeze Fix)
+// ==========================================
+async function runFFmpegAsync(args, stepName) {
+    return new Promise((resolve) => {
+        const ffmpegProc = spawn('ffmpeg', args);
+        let lastLogTime = Date.now();
+
+        // Real-time log monitor to prevent freeze
+        ffmpegProc.stderr.on('data', (data) => {
+            const output = data.toString().trim();
+            // Sirf zaroori logs print karein (Error ya har 3 second baad progress)
+            if (output.toLowerCase().includes('error') || Date.now() - lastLogTime > 3000) {
+                if (output.includes('time=') || output.toLowerCase().includes('error')) {
+                    console.log(`[FFmpeg ${stepName}]: ${output.substring(0, 100)}...`);
+                }
+                lastLogTime = Date.now();
+            }
+        });
+
+        ffmpegProc.on('close', (code) => {
+            if (code === 0) {
+                console.log(`[✅] ${stepName} Completed Successfully!`);
+                resolve(true);
+            } else {
+                console.log(`[❌] ${stepName} Failed with Code: ${code}`);
+                resolve(false);
+            }
+        });
+    });
+}
+
+// ==========================================
 // 🎥 WORKER 1 & 2: SCREEN RECORDING + EDIT 
 // ==========================================
 async function worker_1_2_capture_and_edit(outputVid) {
     console.log(`\n[🎬 Worker 1 & 2] Physical Screen Recording & Fast Edit shuru ho raha hai...`);
-    const audioFile = "marya_live.mp3"; const bgImage = "website_frame.png"; const staticVideo = "main_video.mp4"; const duration = "10"; const blurAmount = "15:3"; 
+    const audioFile = "marya_live.mp3"; const bgImage = "website_frame.png"; const staticVideo = "main_video.mp4"; 
+    const duration = "10"; const blurAmount = "15:3"; 
+    
     const hasBg = fs.existsSync(bgImage); const hasAudio = fs.existsSync(audioFile); const hasMainVideo = fs.existsSync(staticVideo);
     const raw10sVid = `raw_screen_${Date.now()}.mp4`; const tempDynVideo = `temp_dyn_${Date.now()}.mp4`; 
 
+    // ----------------------------------------
     // STEP 0: RECORD 10 SECONDS
-    console.log(`[>] [Step 0] Recording 10 seconds of LIVE Fullscreen (x11grab)...`);
+    // ----------------------------------------
+    console.log(`\n[>] [Step 0] Recording 10 seconds of LIVE Fullscreen (x11grab)...`);
     const captureArgs = ['-y', '-f', 'x11grab', '-draw_mouse', '0', '-video_size', '1280x720', '-framerate', '30', '-i', DISPLAY_NUM, '-f', 'pulse', '-i', 'default', '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '2', '-c:a', 'aac', '-t', duration, raw10sVid];
-    const recResult = spawnSync('ffmpeg', captureArgs, { stdio: 'pipe', timeout: 25000 });
-    if (recResult.error || !fs.existsSync(raw10sVid) || fs.statSync(raw10sVid).size < 1000) return false;
     
-    // STEP A: EDIT CLIP
-    console.log(`[>] [Step A] Applying Blur & PiP Frame on recorded clip...`);
+    const recordSuccess = await runFFmpegAsync(captureArgs, "Screen Capture");
+    if (!recordSuccess || !fs.existsSync(raw10sVid) || fs.statSync(raw10sVid).size < 1000) {
+        console.log(`[❌] Screen recording fail ho gayi. File nahi bani.`); return false;
+    }
+
+    // 🔴 ECO-MODE: Yahan hum fauran browser band kar rahe hain taake CPU/RAM free ho jaye!
+    console.log(`[🧹 ECO-MODE] Screen capture done. Closing browser to free up RAM before heavy processing...`);
+    await cleanup(); 
+
+    // ----------------------------------------
+    // STEP A: EDIT CLIP (Blur & PiP)
+    // ----------------------------------------
+    console.log(`\n[>] [Step A] Applying Blur & PiP Frame on recorded clip...`);
     let args1 = ["-y", "-thread_queue_size", "1024", "-i", raw10sVid]; 
     if (hasBg) args1.push("-thread_queue_size", "1024", "-loop", "1", "-framerate", "30", "-i", bgImage);
     if (hasAudio) args1.push("-thread_queue_size", "1024", "-stream_loop", "-1", "-i", audioFile);
+    
     let filterComplex1 = hasBg ? `[0:v]scale=1064:565,boxblur=${blurAmount}[pip]; [1:v][pip]overlay=0:250:shortest=1,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]` : `[0:v]scale=1280:720,boxblur=${blurAmount},format=yuv420p[outv]`;
     args1.push("-filter_complex", filterComplex1, "-map", "[outv]");
     args1.push(hasAudio ? (hasBg ? "-map" : "-map") : "-map", hasAudio ? (hasBg ? "2:a:0" : "1:a:0") : "0:a:0");
     args1.push("-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-c:a", "aac", "-b:a", "128k", tempDynVideo);
 
-    const editResult = spawnSync('ffmpeg', args1, { stdio: 'pipe', timeout: 120000 });
-    if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid);
-    if (editResult.error || editResult.status !== 0 || !fs.existsSync(tempDynVideo)) return false;
+    const editSuccess = await runFFmpegAsync(args1, "Apply Filters");
+    if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid); // Cleanup raw clip
+    
+    if (!editSuccess || !fs.existsSync(tempDynVideo)) {
+        console.log(`[❌] Edit step failed.`); return false;
+    }
 
+    // ----------------------------------------
     // STEP B: MERGE
+    // ----------------------------------------
     if (hasMainVideo) {
-        console.log(`[>] [Step B] Merging with 'main_video.mp4'...`);
+        console.log(`\n[>] [Step B] Merging with 'main_video.mp4'...`);
         let args2 = ["-y", "-i", tempDynVideo, "-i", staticVideo, "-filter_complex", "[0:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v0]; [0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0]; [1:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v1]; [1:a]aformat=sample_rates=44100:channel_layouts=stereo[a1]; [v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]", "-map", "[outv]", "-map", "[outa]", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-c:a", "aac", "-b:a", "128k", outputVid];
-        const mergeResult = spawnSync('ffmpeg', args2, { stdio: 'pipe', timeout: 120000 });
+        
+        const mergeSuccess = await runFFmpegAsync(args2, "Merge Video");
         fs.unlinkSync(tempDynVideo); 
-        if (!mergeResult.error && fs.existsSync(outputVid)) return true;
+        
+        if (mergeSuccess && fs.existsSync(outputVid)) return true;
     } else {
+        console.log(`[⚠️] 'main_video.mp4' nahi mili! Sirf edited clip final bani.`);
         fs.renameSync(tempDynVideo, outputVid); return true;
     }
     return false;
@@ -241,7 +295,7 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
 // 🚀 CRASH MANAGER & MAIN HYBRID LOOP
 // ==========================================
 async function cleanup() {
-    if (browser) { try { await browser.close(); console.log(`[🧹] Browser CLOSED to save RAM & CPU!`); } catch (e) { } browser = null; page = null; targetFrame = null; }
+    if (browser) { try { await browser.close(); console.log(`[🧹] Browser connection closed.`); } catch (e) { } browser = null; page = null; targetFrame = null; }
 }
 
 async function triggerNextRun() {
@@ -251,7 +305,7 @@ async function triggerNextRun() {
 
 async function main() {
     console.log("\n==================================================");
-    console.log(`   🚀 HYBRID SCREEN-RECORDING BOT (ECO-MODE)`);
+    console.log(`   🚀 HYBRID SCREEN-RECORDING BOT (ECO-MODE + ASYNC)`);
     console.log(`   ⏰ STARTED AT: ${formatPKT()}`);
     console.log("==================================================");
 
@@ -272,25 +326,26 @@ async function main() {
         const finalVidFile = `final_${clipCounter}.mp4`;
 
         try {
-            // 1. FRESH BROWSER KHOLO (Pehle cycle mein true pass kiya debug ke liye)
+            // 1. FRESH BROWSER KHOLO
             await initBrowserAndPlayer(clipCounter === 1); 
             
-            // 2. SAB WORKERS CHALAO
-            if (await worker_0_5_generate_thumbnail(meta.title, thumbFile)) {
-                if (await worker_1_2_capture_and_edit(finalVidFile)) {
-                    await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc);
-                }
+            // 2. THUMBNAIL BANAO
+            await worker_0_5_generate_thumbnail(meta.title, thumbFile);
+            
+            // 3. CAPTURE, EDIT, UPLOAD (Note: Browser is killed INSIDE worker_1_2 after capture)
+            if (await worker_1_2_capture_and_edit(finalVidFile)) {
+                await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc);
             }
         } catch (err) {
             console.error(`\n[!] CRASH DETECTED IN CYCLE #${clipCounter}: ${err.message}`);
         } finally {
-            // 3. HAMESHA BROWSER BAND KAR DO (Save GitHub Actions resources!)
+            // 4. FAILSAFE BROWSER CLEANUP
             await cleanup();
             
             [thumbFile, finalVidFile].forEach(f => { if (fs.existsSync(f)) { fs.unlinkSync(f); } });
             console.log(`\n[⏳ Cycle End] Cycle #${clipCounter} Mukammal! Aglay round tak 5 minute wait kar raha hoon...`);
             clipCounter++;
-            await new Promise(r => setTimeout(r, WAIT_TIME_MS)); // 5 MINUTE WAIT
+            await new Promise(r => setTimeout(r, WAIT_TIME_MS)); 
         }
     }
 }
