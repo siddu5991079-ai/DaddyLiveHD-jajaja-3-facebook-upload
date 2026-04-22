@@ -79,7 +79,7 @@ async function initBrowserAndPlayer(isFirstCycle) {
 
     console.log(`[*] Navigating to target URL: ${TARGET_URL}...`);
     await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await new Promise(r => setTimeout(r, 10000)); // Cloudflare bypass wait
+    await new Promise(r => setTimeout(r, 10000)); 
 
     console.log('[*] Scanning iframes for the REAL Live Stream Video...');
     for (const frame of page.frames()) {
@@ -123,14 +123,14 @@ async function initBrowserAndPlayer(isFirstCycle) {
 
     console.log('[✅] Browser Ready! Video is playing fullscreen.');
 
-    // 🎥 DEBUG RECORDING (Only on First Cycle)
+    // 🎥 DEBUG RECORDING
     if (isFirstCycle) {
         console.log(`\n[🔍 DEBUG] Cycle 1 par 15-second ki Visual Debug Recording kar raha hoon...`);
         const recorder = new PuppeteerScreenRecorder(page);
         const debugFileName = `debug_video_${Date.now()}.mp4`;
         await recorder.start(debugFileName);
         
-        await new Promise(r => setTimeout(r, 15000)); // Record for 15 seconds
+        await new Promise(r => setTimeout(r, 15000)); 
         await recorder.stop();
         
         console.log(`[📤 DEBUG] Uploading to GitHub Releases...`);
@@ -139,7 +139,7 @@ async function initBrowserAndPlayer(isFirstCycle) {
             execSync(`gh release create ${tagName} ${debugFileName} --title "Visual Debug Capture" --notes "First Cycle Screen Check"`, { stdio: 'inherit' });
             console.log('✅ [+] Successfully uploaded visual debug video to GitHub Releases!');
         } catch (err) {
-            console.error('❌ [!] Failed to upload debug video (Check gh release permissions):', err.message);
+            console.error('❌ [!] Failed to upload debug video:', err.message);
         }
         if (fs.existsSync(debugFileName)) fs.unlinkSync(debugFileName);
     }
@@ -171,17 +171,15 @@ async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
 }
 
 // ==========================================
-// 🛠️ ASYNC FFMPEG EXECUTOR (Buffer Freeze Fix)
+// 🛠️ ASYNC FFMPEG EXECUTOR 
 // ==========================================
 async function runFFmpegAsync(args, stepName) {
     return new Promise((resolve) => {
         const ffmpegProc = spawn('ffmpeg', args);
         let lastLogTime = Date.now();
 
-        // Real-time log monitor to prevent freeze
         ffmpegProc.stderr.on('data', (data) => {
             const output = data.toString().trim();
-            // Sirf zaroori logs print karein (Error ya har 3 second baad progress)
             if (output.toLowerCase().includes('error') || Date.now() - lastLogTime > 3000) {
                 if (output.includes('time=') || output.toLowerCase().includes('error')) {
                     console.log(`[FFmpeg ${stepName}]: ${output.substring(0, 100)}...`);
@@ -224,7 +222,7 @@ async function worker_1_2_capture_and_edit(outputVid) {
         console.log(`[❌] Screen recording fail ho gayi. File nahi bani.`); return false;
     }
 
-    // 🔴 ECO-MODE: Yahan hum fauran browser band kar rahe hain taake CPU/RAM free ho jaye!
+    // 🔴 ECO-MODE: Browser band kar do
     console.log(`[🧹 ECO-MODE] Screen capture done. Closing browser to free up RAM before heavy processing...`);
     await cleanup(); 
 
@@ -239,10 +237,12 @@ async function worker_1_2_capture_and_edit(outputVid) {
     let filterComplex1 = hasBg ? `[0:v]scale=1064:565,boxblur=${blurAmount}[pip]; [1:v][pip]overlay=0:250:shortest=1,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]` : `[0:v]scale=1280:720,boxblur=${blurAmount},format=yuv420p[outv]`;
     args1.push("-filter_complex", filterComplex1, "-map", "[outv]");
     args1.push(hasAudio ? (hasBg ? "-map" : "-map") : "-map", hasAudio ? (hasBg ? "2:a:0" : "1:a:0") : "0:a:0");
-    args1.push("-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-c:a", "aac", "-b:a", "128k", tempDynVideo);
+    
+    // 🚀 FIX APPLIED HERE: Added "-t duration" before the output file so it strictly stops at 10 seconds!
+    args1.push("-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-c:a", "aac", "-b:a", "128k", "-t", duration, tempDynVideo);
 
     const editSuccess = await runFFmpegAsync(args1, "Apply Filters");
-    if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid); // Cleanup raw clip
+    if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid); 
     
     if (!editSuccess || !fs.existsSync(tempDynVideo)) {
         console.log(`[❌] Edit step failed.`); return false;
@@ -326,22 +326,16 @@ async function main() {
         const finalVidFile = `final_${clipCounter}.mp4`;
 
         try {
-            // 1. FRESH BROWSER KHOLO
             await initBrowserAndPlayer(clipCounter === 1); 
-            
-            // 2. THUMBNAIL BANAO
             await worker_0_5_generate_thumbnail(meta.title, thumbFile);
             
-            // 3. CAPTURE, EDIT, UPLOAD (Note: Browser is killed INSIDE worker_1_2 after capture)
             if (await worker_1_2_capture_and_edit(finalVidFile)) {
                 await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc);
             }
         } catch (err) {
             console.error(`\n[!] CRASH DETECTED IN CYCLE #${clipCounter}: ${err.message}`);
         } finally {
-            // 4. FAILSAFE BROWSER CLEANUP
             await cleanup();
-            
             [thumbFile, finalVidFile].forEach(f => { if (fs.existsSync(f)) { fs.unlinkSync(f); } });
             console.log(`\n[⏳ Cycle End] Cycle #${clipCounter} Mukammal! Aglay round tak 5 minute wait kar raha hoon...`);
             clipCounter++;
