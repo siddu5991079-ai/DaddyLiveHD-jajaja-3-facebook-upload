@@ -1,5 +1,8 @@
-const puppeteer = require('puppeteer');
-const { spawnSync, execSync } = require('child_process');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
+
+const { spawnSync } = require('child_process');
 const fs = require('fs');
 const FormData = require('form-data');
 const axios = require('axios'); 
@@ -18,13 +21,18 @@ const TITLES_INPUT = process.env.TITLES_LIST || 'Live Match Today,,Watch Full Ma
 const DESCS_INPUT = process.env.DESCS_LIST || 'Watch the live action here';
 const HASHTAGS = process.env.HASHTAGS || '#IPL2026 #DCvsGT #CricketLovers #LiveMatch';
 
-const WAIT_TIME_MS = 300 * 1000; 
+const WAIT_TIME_MS = 300 * 1000; // 5 Minutes loop wait
 const START_TIME = Date.now();
-const RESTART_TRIGGER_MS = (5 * 60 * 60 + 30 * 60) * 1000; 
-const END_TIME_LIMIT_MS = (5 * 60 * 60 + 50 * 60) * 1000; 
+const RESTART_TRIGGER_MS = (5 * 60 * 60 + 30 * 60) * 1000; // 5.5 Hours
+const END_TIME_LIMIT_MS = (5 * 60 * 60 + 50 * 60) * 1000; // 5.8 Hours
 
-let consecutiveLinkFails = 0;
 let clipCounter = 1;
+
+// 🌐 GLOBAL BROWSER VARIABLES (Always Open)
+let browser = null;
+let page = null;
+let targetFrame = null;
+const DISPLAY_NUM = process.env.DISPLAY || ':99';
 
 function formatPKT(timestampMs = Date.now()) {
     return new Date(timestampMs).toLocaleString('en-US', {
@@ -33,9 +41,6 @@ function formatPKT(timestampMs = Date.now()) {
     }) + " PKT";
 }
 
-// ==========================================
-// 🧠 METADATA GENERATOR
-// ==========================================
 function generateMetadata(clipNum) {
     console.log(`\n[🧠 Metadata] Cycle #${clipNum} ke liye naya Title aur Description ban raha hai...`);
     const titles = TITLES_INPUT.split(',,').map(t => t.trim()).filter(t => t);
@@ -47,116 +52,113 @@ function generateMetadata(clipNum) {
     
     const finalTitle = title.substring(0, 240); 
     const finalDesc = `${finalTitle} ${emojis.join(' ')}\n\n${descBody}\n\n⏱️ Update: ${formatPKT()}\n👇 Watch Full Match Link in First Comment!\n\n${tags}`;
-    console.log(`[✅ Metadata] Ready: ${finalTitle}`);
     return { title: finalTitle, desc: finalDesc };
 }
 
-// ==========================================
-// 🔍 WORKER 0: GET M3U8 LINK (SMART CHECK LOGIC)
-// ==========================================
-async function getStreamData() {
-    console.log(`\n[🔍 STEP 1] Puppeteer Chrome Start kar raha hoon... (Strike: ${consecutiveLinkFails}/3)`);
-    const browser = await puppeteer.launch({ 
-        headless: true, 
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled', '--mute-audio'] 
-    });
-    const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-    let streamData = null;
-    page.on('request', (request) => {
-        const url = request.url();
-        if (url.includes('.m3u8')) {
-            const urlObj = new URL(url);
-            const expires = urlObj.searchParams.get('expires') || urlObj.searchParams.get('e') || urlObj.searchParams.get('exp');
-            let expireMs = expires ? parseInt(expires) * 1000 : Date.now() + (60 * 60 * 1000);
-            streamData = {
-                url: url, referer: request.headers()['referer'] || TARGET_URL,
-                cookie: request.headers()['cookie'] || '', expireTime: expireMs
-            };
-        }
+// =========================================================================
+// 🌐 SETUP BROWSER & PLAYER (Live Screen Recording Mode + Project 1)
+// =========================================================================
+async function initBrowserAndPlayer() {
+    console.log(`\n[*] Starting browser for Continuous Screen Capture...`);
+    
+    browser = await puppeteer.launch({
+        channel: 'chrome',
+        headless: false, 
+        defaultViewport: { width: 1280, height: 720 },
+        ignoreDefaultArgs: ['--enable-automation'], 
+        args: [
+            '--no-sandbox', '--disable-setuid-sandbox', 
+            '--window-size=1280,720', '--kiosk', 
+            '--autoplay-policy=no-user-gesture-required', '--mute-audio'
+        ]
     });
 
-    try {
-        console.log(`[🌐] Target URL par ja raha hoon: ${TARGET_URL}`);
-        await page.goto(TARGET_URL, { waitUntil: 'networkidle2', timeout: 60000 });
-        
-        // 🚀 PROJECT 1: SMART SCANNER & FORCED PLAY LOGIC
-        console.log('[*] Scanning iframes for the REAL Live Stream Video (Project 1 Integration)...');
-        let targetFrame = null;
-        for (const frame of page.frames()) {
+    page = await browser.newPage();
+    const pages = await browser.pages();
+    for (const p of pages) if (p !== page) await p.close();
+
+    // Aggressive Ad Blocker
+    browser.on('targetcreated', async (target) => {
+        if (target.type() === 'page') {
             try {
-                const isRealLiveStream = await frame.evaluate(() => {
-                    const vid = document.querySelector('video[data-html5-video]') || document.querySelector('video');
-                    return !!vid; 
-                });
-                if (isRealLiveStream) {
-                    targetFrame = frame;
-                    console.log(`[+] Smart Scanner selected Real Video in frame: ${frame.url() || 'unknown'}`);
-                    break;
+                const newPage = await target.page();
+                if (newPage && newPage !== page) {
+                    await page.bringToFront(); 
+                    setTimeout(() => newPage.close().catch(() => {}), 1000);
                 }
             } catch (e) { }
         }
+    });
 
-        if (targetFrame) {
-            console.log('[*] Executing JS Play logic to trigger m3u8 request...');
-            await targetFrame.evaluate(async () => {
-                const video = document.querySelector('video[data-html5-video]') || document.querySelector('video');
-                if (video) {
-                    video.muted = true; // Audio mute is safer for auto-play
-                    await video.play().catch(e => {});
-                }
-            });
-        } else {
-            console.log('[⚠️] Specific video element nahi mila, fallback to general click...');
-            await page.click('body').catch(() => {});
-        }
-        // 🚀 PROJECT 1 END
-
-        console.log(`[⏳] M3U8 Link ka intezar hai... (5 Second ke 3 Rounds)`);
-        
-        for (let i = 1; i <= 3; i++) {
-            await new Promise(r => setTimeout(r, 5000)); // 5 Second Wait
-            
-            if (streamData) {
-                console.log(`[✅] Round ${i} mein link mil gaya! Aage barh raha hoon...`);
-                break; 
-            } else {
-                console.log(`[⚠️] Round ${i}/3: Abhi tak link nahi mila. Mazeed wait kar raha hoon...`);
-            }
-        }
-
-    } catch (e) { 
-        console.log(`[❌ ERROR] Page load nahi ho saka.`); 
-    }
+    console.log(`[*] Navigating to target URL: ${TARGET_URL}...`);
+    await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     
-    await browser.close();
+    // Cloudflare/Loader wait
+    await new Promise(r => setTimeout(r, 10000));
 
-    if (streamData) {
-        consecutiveLinkFails = 0; 
-        console.log(`[✅ BINGO] M3U8 Link pakar liya gaya! Expiry: ${formatPKT(streamData.expireTime)}`);
-        return streamData;
-    } else {
-        consecutiveLinkFails++;
-        console.log(`[🚨 WARNING] 3 Rounds poore hue par Link nahi mila. Strike: ${consecutiveLinkFails}/3`);
-        
-        if (consecutiveLinkFails >= 3) {
-            console.log(`[🛑 FATAL] 3 baar consecutive link fail hua! Bot ko hamesha ke liye band kar raha hoon.`);
-            process.exit(1); 
-        }
-        return null;
+    // 🚀 PROJECT 1: Smart Scanner
+    console.log('[*] Scanning iframes for the REAL Live Stream Video...');
+    for (const frame of page.frames()) {
+        try {
+            const isRealLiveStream = await frame.evaluate(() => {
+                const vid = document.querySelector('video[data-html5-video]') || document.querySelector('video');
+                return vid && vid.clientWidth > 300; 
+            });
+
+            if (isRealLiveStream) {
+                targetFrame = frame;
+                console.log(`[+] Real Video detected in frame!`);
+                
+                await frame.evaluate(() => {
+                    const floatedAd = document.getElementById('floated');
+                    if (floatedAd) floatedAd.remove();
+                });
+            }
+        } catch (e) { }
     }
+
+    if (!targetFrame) throw new Error('No <video> element could be found.');
+
+    // Click & Play
+    try {
+        const iframeEl = await targetFrame.frameElement();
+        const box = await iframeEl.boundingBox();
+        if (box) await page.mouse.click(box.x + (box.width / 2), box.y + (box.height / 2), { delay: 100 });
+        await new Promise(r => setTimeout(r, 2000));
+    } catch (e) { }
+
+    await targetFrame.evaluate(async () => {
+        const video = document.querySelector('video[data-html5-video]') || document.querySelector('video');
+        if (video) { video.volume = 1.0; await video.play().catch(e => {}); }
+    });
+
+    // 🚀 PROJECT 1: Fullscreen Hack (Crucial for x11grab)
+    await targetFrame.evaluate(async () => {
+        const vid = document.querySelector('video[data-html5-video]') || document.querySelector('video');
+        if (!vid) return;
+        try {
+            if (vid.requestFullscreen) await vid.requestFullscreen();
+            else if (vid.webkitRequestFullscreen) await vid.webkitRequestFullscreen();
+        } catch (err) {
+            vid.style.position = 'fixed'; vid.style.top = '0'; vid.style.left = '0';
+            vid.style.width = '100vw'; vid.style.height = '100vh';
+            vid.style.zIndex = '2147483647'; vid.style.backgroundColor = 'black';
+            vid.style.objectFit = 'contain';
+        }
+    });
+
+    console.log('[✅] Browser Ready! Video is playing fullscreen.');
 }
 
 // ==========================================
-// 📸 WORKER 0.5: GENERATE THUMBNAIL
+// 📸 WORKER 0.5: GENERATE THUMBNAIL (Live Screenshot)
 // ==========================================
-async function worker_0_5_generate_thumbnail(data, titleText, outputImagePath) {
-    console.log(`\n[🎨 Worker 0.5] Puppeteer se HD Thumbnail bana raha hoon...`);
+async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
+    console.log(`\n[🎨 Worker 0.5] Puppeteer se Live Screen ka HD Thumbnail bana raha hoon...`);
     const rawFrame = 'temp_raw_frame.jpg';
     try {
-        const headersCmd = `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\nReferer: ${data.referer}\r\nCookie: ${data.cookie}\r\n`;
-        execSync(`ffmpeg -y -headers "${headersCmd}" -i "${data.url}" -vframes 1 -q:v 2 ${rawFrame}`, { stdio: 'ignore' });
+        // Direct screenshot from the running browser!
+        await page.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
     } catch (e) { return false; }
 
     if (!fs.existsSync(rawFrame)) return false;
@@ -183,22 +185,21 @@ async function worker_0_5_generate_thumbnail(data, titleText, outputImagePath) {
             <div class="text-container"><div class="main-title"><span class="live-text">LIVE NOW: </span>${titleText}</div></div>
         </body></html>`;
 
-    const browser = await puppeteer.launch({ headless: true, defaultViewport: { width: 1280, height: 720 }, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-    const page = await browser.newPage();
-    await page.setContent(htmlCode);
-    await page.screenshot({ path: outputImagePath });
-    await browser.close();
+    const tb = await puppeteer.launch({ headless: true, defaultViewport: { width: 1280, height: 720 }, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const tPage = await tb.newPage();
+    await tPage.setContent(htmlCode);
+    await tPage.screenshot({ path: outputImagePath });
+    await tb.close();
     if (fs.existsSync(rawFrame)) fs.unlinkSync(rawFrame); 
     console.log(`[✅ Worker 0.5] Thumbnail Ready: ${outputImagePath}`);
     return true;
 }
 
 // ==========================================
-// 🎥 WORKER 1 & 2: CAPTURE, EDIT & MERGE
+// 🎥 WORKER 1 & 2: SCREEN RECORDING + EDIT (X11 Grab Mode)
 // ==========================================
-async function worker_1_2_capture_and_edit(data, outputVid) {
-    console.log(`\n[🎬 Worker 1 & 2] Stream capture, PiP Frame aur Merging shuru ho rahi hai...`);
-    const headersCmd = `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\nReferer: ${data.referer}\r\nCookie: ${data.cookie}\r\n`;
+async function worker_1_2_capture_and_edit(outputVid) {
+    console.log(`\n[🎬 Worker 1 & 2] Physical Screen Recording & Fast Edit shuru ho raha hai...`);
     
     const audioFile = "marya_live.mp3";
     const bgImage = "website_frame.png";
@@ -210,15 +211,32 @@ async function worker_1_2_capture_and_edit(data, outputVid) {
     const hasAudio = fs.existsSync(audioFile);
     const hasMainVideo = fs.existsSync(staticVideo);
 
+    const raw10sVid = `raw_screen_${Date.now()}.mp4`; 
     const tempDynVideo = `temp_dyn_${Date.now()}.mp4`; 
 
     // -----------------------------------------------------
-    // STEP A: 10 Second Ki Live Clip Banana (Blur + PiP)
+    // STEP 0: RECORD 10 SECONDS LIVE FROM VIRTUAL SCREEN
     // -----------------------------------------------------
-    console.log(`[>] Step A: 10 sec ki live clip tayyar kar raha hoon...`);
-    let args1 = [
-        "-y", "-thread_queue_size", "1024", "-headers", headersCmd, "-i", data.url
+    console.log(`[>] Recording 10 seconds of LIVE screen (x11grab)...`);
+    const captureArgs = [
+        '-y', '-f', 'x11grab', '-draw_mouse', '0', '-video_size', '1280x720', '-framerate', '30', '-i', DISPLAY_NUM,
+        '-f', 'pulse', '-i', 'default', // Capturing audio from pulseaudio
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-t', duration,
+        raw10sVid
     ];
+    
+    spawnSync('ffmpeg', captureArgs, { stdio: 'ignore' });
+    
+    if (!fs.existsSync(raw10sVid) || fs.statSync(raw10sVid).size < 1000) {
+        console.log(`[❌] Screen recording fail ho gayi. File nahi bani.`);
+        return false;
+    }
+
+    // -----------------------------------------------------
+    // STEP A: Apply Blur & PiP (Using Recorded Clip as Input)
+    // -----------------------------------------------------
+    console.log(`[>] Step A: Applying Blur & PiP Frame on recorded clip...`);
+    let args1 = ["-y", "-thread_queue_size", "1024", "-i", raw10sVid]; // Using our fresh 10s recording!
 
     if (hasBg) {
         args1.push("-thread_queue_size", "1024", "-loop", "1", "-framerate", "30", "-i", bgImage);
@@ -243,63 +261,47 @@ async function worker_1_2_capture_and_edit(data, outputVid) {
         args1.push("-map", "0:a:0");
     }
 
-    args1.push("-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", "-t", duration, tempDynVideo);
+    args1.push("-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", tempDynVideo);
 
-    try {
-        const result1 = spawnSync('ffmpeg', args1, { stdio: 'pipe' });
-        if (result1.status !== 0) console.log(`[❌] Step A Error Details:\n${result1.stderr.toString()}`);
+    spawnSync('ffmpeg', args1, { stdio: 'ignore' });
+    if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid); // Cleanup raw clip
 
-        if (fs.existsSync(tempDynVideo) && fs.statSync(tempDynVideo).size > 1000) {
-            console.log(`[✅] Step A Done! 10 sec ki clip ban gayi.`);
+    if (fs.existsSync(tempDynVideo) && fs.statSync(tempDynVideo).size > 1000) {
+        console.log(`[✅] Step A Done! Edited clip ban gayi.`);
+        
+        // -----------------------------------------------------
+        // STEP B: Merge with main_video.mp4
+        // -----------------------------------------------------
+        if (hasMainVideo) {
+            console.log(`[>] Step B: Merging with 'main_video.mp4'...`);
+            let args2 = [
+                "-y", "-i", tempDynVideo, "-i", staticVideo,
+                "-filter_complex",
+                "[0:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v0]; [0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0]; [1:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v1]; [1:a]aformat=sample_rates=44100:channel_layouts=stereo[a1]; [v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]",
+                "-map", "[outv]", "-map", "[outa]",
+                "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", outputVid
+            ];
             
-            // -----------------------------------------------------
-            // STEP B: Live Clip ko Main Video ke sath Jorna (Merge)
-            // -----------------------------------------------------
-            if (hasMainVideo) {
-                console.log(`[>] Step B: 'main_video.mp4' mil gayi! Ab dono ko aapas mein merge kar raha hoon...`);
-                
-                let args2 = [
-                    "-y",
-                    "-i", tempDynVideo,
-                    "-i", staticVideo,
-                    "-filter_complex",
-                    "[0:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v0]; [0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0]; [1:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v1]; [1:a]aformat=sample_rates=44100:channel_layouts=stereo[a1]; [v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]",
-                    "-map", "[outv]",
-                    "-map", "[outa]",
-                    "-c:v", "libx264",
-                    "-preset", "ultrafast",
-                    "-c:a", "aac",
-                    "-b:a", "128k",
-                    outputVid
-                ];
-
-                const result2 = spawnSync('ffmpeg', args2, { stdio: 'pipe' });
-                if (result2.status !== 0) console.log(`[❌] Step B Error Details:\n${result2.stderr.toString()}`);
-                
-                fs.unlinkSync(tempDynVideo); 
-
-                if (fs.existsSync(outputVid) && fs.statSync(outputVid).size > 1000) {
-                    console.log(`[✅ Worker 1 & 2] Merging SUCCESS! Final Video Ready: ${outputVid}`);
-                    return true;
-                } else {
-                    console.log(`[❌ Worker 1 & 2] Merging ke dauran file corrupt ho gayi.`);
-                }
-
-            } else {
-                console.log(`[⚠️] 'main_video.mp4' nahi mili! Sirf 10 sec ki clip ko hi final bana raha hoon.`);
-                fs.renameSync(tempDynVideo, outputVid); 
+            spawnSync('ffmpeg', args2, { stdio: 'ignore' });
+            fs.unlinkSync(tempDynVideo); 
+            
+            if (fs.existsSync(outputVid) && fs.statSync(outputVid).size > 1000) {
+                console.log(`[✅ Worker 1 & 2] SUCCESS! Final Video Ready: ${outputVid}`);
                 return true;
+            } else {
+                console.log(`[❌ Worker 1 & 2] Merging ke dauran file corrupt ho gayi.`);
             }
+        } else {
+            console.log(`[⚠️] 'main_video.mp4' nahi mili! Sirf edited clip final bani.`);
+            fs.renameSync(tempDynVideo, outputVid); 
+            return true;
         }
-    } catch (e) { 
-        console.log(`[❌ Worker 1 & 2] FFmpeg processing code crash ho gaya!`); 
     }
-    
     return false;
 }
 
 // ==========================================
-// 📤 WORKER 3: FACEBOOK UPLOAD
+// 📤 WORKER 3: FACEBOOK UPLOAD 
 // ==========================================
 async function checkFacebookToken(token) {
     const res = await axios.get(`https://graph.facebook.com/v18.0/me?access_token=${token}&fields=id,name`);
@@ -307,27 +309,22 @@ async function checkFacebookToken(token) {
 }
 
 async function worker_3_upload(videoPath, thumbPath, title, desc) {
-    console.log(`\n[📤 Worker 3] Facebook Upload (Manual Mode: ${TOKEN_SELECTION})`);
+    console.log(`\n[📤 Worker 3] Facebook Upload (Mode: ${TOKEN_SELECTION})`);
     
     let tokensToTry = [];
     if (TOKEN_SELECTION === 'Token1') tokensToTry = [FB_TOKEN_1];
     else if (TOKEN_SELECTION === 'Token2') tokensToTry = [FB_TOKEN_2];
     else tokensToTry = [FB_TOKEN_1, FB_TOKEN_2]; 
 
-    let activeToken = null;
-    let pageId = null;
+    let activeToken = null, pageId = null;
 
     for (let token of tokensToTry) {
         if (!token) continue;
         try {
             const info = await checkFacebookToken(token);
-            activeToken = token;
-            pageId = info.pageId;
-            console.log(`[✅ FB Auth] Token Valid! Connected To Page: ${info.pageName}`);
-            break; 
-        } catch (e) {
-            console.log(`[⚠️] Token fail hua. Next try...`);
-        }
+            activeToken = token; pageId = info.pageId;
+            console.log(`[✅ FB Auth] Connected To Page: ${info.pageName}`); break; 
+        } catch (e) { }
     }
 
     if (!activeToken) {
@@ -337,113 +334,120 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
 
     try {
         const form = new FormData();
-        form.append('access_token', activeToken);
-        form.append('title', title);
+        form.append('access_token', activeToken); 
+        form.append('title', title); 
         form.append('description', desc);
         form.append('source', fs.createReadStream(videoPath));
         if (fs.existsSync(thumbPath)) form.append('thumb', fs.createReadStream(thumbPath));
 
-        console.log(`[>] Video Upload ho rahi hai (Isme 10-20 seconds lag sakte hain)...`);
+        console.log(`[>] Video Upload ho rahi hai (Isme kuch seconds lag sakte hain)...`);
         const uploadRes = await axios.post(`https://graph-video.facebook.com/v18.0/${pageId}/videos`, form, { headers: form.getHeaders() });
         const videoId = uploadRes.data.id;
-        console.log(`[✅ Worker 3] Video Successfully Uploaded! (Post ID: ${videoId})`);
+        console.log(`[✅] Video Uploaded! (ID: ${videoId})`);
 
-        console.log(`[⏳] 15 second ka wait FB ki processing poori hone ke liye...`);
         await new Promise(r => setTimeout(r, 15000));
         
         console.log(`\n[💬] Promotional Comment post karne laga hoon...`);
         const commentForm = new FormData();
         commentForm.append('access_token', activeToken);
         commentForm.append('message', '📺 Watch Full Match Without Buffering Here: https://bulbul4u-live.xyz');
-        
-        if (fs.existsSync("comment_image.jpeg")) {
-            console.log(`[📸] 'comment_image.jpeg' mil gayi hai! Comment mein image attach kar raha hoon...`);
-            commentForm.append('source', fs.createReadStream("comment_image.jpeg"));
-        } else {
-            console.log(`[ℹ️ INFO] 'comment_image.jpeg' nahi mili. Sirf text wala comment post ho raha hai.`);
-        }
+        if (fs.existsSync("comment_image.jpeg")) commentForm.append('source', fs.createReadStream("comment_image.jpeg"));
 
         await axios.post(`https://graph.facebook.com/v18.0/${videoId}/comments`, commentForm, { headers: commentForm.getHeaders() });
-        console.log(`[✅ Worker 3] Comment Successfully Post Ho Gaya!`);
+        console.log(`[✅] Comment Posted!`);
         return true;
-    } catch (e) {
+    } catch (e) { 
         console.log(`[❌ Worker 3] Upload Crash: ${e.message}`);
-        return false;
+        return false; 
     }
 }
 
 // ==========================================
-// 🚀 MAIN HYBRID LOOP (THE BRAIN)
+// 🚀 HYBRID LOOP & WATCHDOG
 // ==========================================
 async function triggerNextRun() {
-    console.log(`\n[🔄 AUTO-RESTART] GitHub API ke zariye naya bot chala raha hoon...`);
-    const token = process.env.GH_PAT;
-    const repo = process.env.GITHUB_REPOSITORY;
-    const branch = process.env.GITHUB_REF_NAME || 'main';
+    const token = process.env.GH_PAT, repo = process.env.GITHUB_REPOSITORY, branch = process.env.GITHUB_REF_NAME || 'main';
     if (!token || !repo) return;
-    try {
-        await axios.post(`https://api.github.com/repos/${repo}/actions/workflows/video_loop.yml/dispatches`, {
-            ref: branch, inputs: { target_url: TARGET_URL, titles_list: TITLES_INPUT, descs_list: DESCS_INPUT, hashtags: HASHTAGS, token_selection: TOKEN_SELECTION }
-        }, { headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+    try { 
+        await axios.post(`https://api.github.com/repos/${repo}/actions/workflows/video_loop.yml/dispatches`, { ref: branch, inputs: { target_url: TARGET_URL, titles_list: TITLES_INPUT, descs_list: DESCS_INPUT, hashtags: HASHTAGS, token_selection: TOKEN_SELECTION } }, { headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' } }); 
+        console.log(`\n[🔄 AUTO-RESTART] GitHub API se naya bot chala diya gaya!`);
     } catch (e) { console.log(`[❌ Relay Race] Trigger failed!`); }
+}
+
+async function runHybridLoop() {
+    let nextRunTriggered = false;
+    
+    // Start background Watchdog
+    const watchdogInterval = setInterval(async () => {
+        if (!browser || !browser.isConnected()) throw new Error("Browser closed.");
+        const isHealthy = await targetFrame.evaluate(() => {
+            const v = document.querySelector('video[data-html5-video]') || document.querySelector('video');
+            return v && !v.paused && !v.ended;
+        }).catch(() => false);
+        if (!isHealthy) throw new Error("Stream stopped or crashed!");
+    }, 5000);
+
+    try {
+        while (true) {
+            const elapsedTimeMs = Date.now() - START_TIME;
+            console.log(`\n--------------------------------------------------`);
+            console.log(`--- 🔄 STARTING VIDEO CYCLE #${clipCounter} ---`);
+            console.log(`  [-] Bot Uptime: ${Math.floor(elapsedTimeMs / 60000)} minutes`);
+            console.log(`--------------------------------------------------`);
+
+            if (elapsedTimeMs > RESTART_TRIGGER_MS && !nextRunTriggered) { await triggerNextRun(); nextRunTriggered = true; }
+            if (elapsedTimeMs > END_TIME_LIMIT_MS) { console.log(`[🛑] 6 Hours Limit. Exiting.`); process.exit(0); }
+
+            const meta = generateMetadata(clipCounter);
+            const thumbFile = `studio_thumb_${clipCounter}.png`;
+            const finalVidFile = `final_${clipCounter}.mp4`;
+
+            console.log(`\n[⚡ Flow] Worker Pipeline Start kar raha hoon...`);
+            if (await worker_0_5_generate_thumbnail(meta.title, thumbFile)) {
+                if (await worker_1_2_capture_and_edit(finalVidFile)) {
+                    await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc);
+                }
+            }
+
+            console.log(`\n[🧹 Cleanup] Temporary files delete kar raha hoon...`);
+            [thumbFile, finalVidFile].forEach(f => { if (fs.existsSync(f)) { fs.unlinkSync(f); console.log(`  [-] Deleted: ${f}`); } });
+            
+            console.log(`\n[⏳ Cycle End] Cycle #${clipCounter} Mukammal! Aglay round tak 5 minute wait kar raha hoon...`);
+            clipCounter++;
+            await new Promise(r => setTimeout(r, WAIT_TIME_MS));
+        }
+    } finally {
+        clearInterval(watchdogInterval);
+    }
+}
+
+// ==========================================
+// 🛡️ CRASH MANAGER (Main Control)
+// ==========================================
+async function cleanup() {
+    if (browser) { 
+        try { await browser.close(); } catch (e) { } 
+        browser = null; page = null; targetFrame = null; 
+    }
 }
 
 async function main() {
     console.log("\n==================================================");
-    console.log(`   🚀 ULTIMATE HYBRID VIDEO BOT - MODE: ${TOKEN_SELECTION}`);
+    console.log(`   🚀 HYBRID SCREEN-RECORDING BOT - MODE: ${TOKEN_SELECTION}`);
     console.log(`   ⏰ STARTED AT: ${formatPKT()}`);
     console.log("==================================================");
 
-    let streamData = await getStreamData();
-    if (!streamData) return;
-    let nextRunTriggered = false;
-
     while (true) {
-        const elapsedTimeMs = Date.now() - START_TIME;
-        
-        console.log(`\n--------------------------------------------------`);
-        console.log(`--- 🔄 STARTING VIDEO CYCLE #${clipCounter} ---`);
-        console.log(`  [-] Bot Uptime: ${Math.floor(elapsedTimeMs / 60000)} minutes`);
-        console.log(`--------------------------------------------------`);
-
-        if (elapsedTimeMs > RESTART_TRIGGER_MS && !nextRunTriggered) { await triggerNextRun(); nextRunTriggered = true; }
-        if (elapsedTimeMs > END_TIME_LIMIT_MS) {
-            console.log(`\n[🛑 System] 6 Ghante ki limit poori. Graceful exit.`);
-            process.exit(0);
+        try {
+            await initBrowserAndPlayer();
+            await runHybridLoop();
+        } catch (err) {
+            console.error(`\n[!] CRASH DETECTED: ${err.message}`);
+            console.log('[*] Restarting browser and resetting loop in 5 seconds...');
+            await cleanup();
+            await new Promise(r => setTimeout(r, 5000));
         }
-
-        if (streamData.expireTime - Date.now() < 120000) {
-            console.log(`[🚨] Link expire hone wala hai! Naya link la raha hoon...`);
-            let newData = await getStreamData();
-            if (newData) streamData = newData;
-            else { 
-                console.log(`[⚠️] Link swap fail. 1 minute baad dobara try karunga...`);
-                await new Promise(r => setTimeout(r, 60000)); 
-                continue; 
-            }
-        }
-
-        const meta = generateMetadata(clipCounter);
-        const thumbFile = `studio_thumb_${clipCounter}.png`;
-        const finalVidFile = `final_${clipCounter}.mp4`;
-
-        console.log(`\n[⚡ Flow] Worker Pipeline Start kar raha hoon...`);
-        if (await worker_0_5_generate_thumbnail(streamData, meta.title, thumbFile)) {
-            if (await worker_1_2_capture_and_edit(streamData, finalVidFile)) {
-                await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc);
-            }
-        }
-
-        console.log(`\n[🧹 Cleanup] Temporary files delete kar raha hoon...`);
-        [thumbFile, finalVidFile].forEach(f => { 
-            if (fs.existsSync(f)) { fs.unlinkSync(f); console.log(`  [-] Deleted: ${f}`); } 
-        });
-        
-        console.log(`\n[⏳ Cycle End] Cycle #${clipCounter} Mukammal! Aglay round tak 5 minute wait kar raha hoon...`);
-        clipCounter++;
-        await new Promise(r => setTimeout(r, WAIT_TIME_MS));
     }
 }
 
-// Start The Bot
 main();
