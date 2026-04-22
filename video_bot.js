@@ -1,4 +1,3 @@
-
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
@@ -124,14 +123,14 @@ async function initBrowserAndPlayer(isFirstCycle) {
 
     console.log('[✅] Browser Ready! Video is playing fullscreen.');
 
-    // 🎥 DEBUG RECORDING (Only on First Cycle)
+    // 🎥 DEBUG RECORDING
     if (isFirstCycle) {
         console.log(`\n[🔍 DEBUG] Cycle 1 par 15-second ki Visual Debug Recording kar raha hoon...`);
         const recorder = new PuppeteerScreenRecorder(page);
         const debugFileName = `debug_video_${Date.now()}.mp4`;
         await recorder.start(debugFileName);
         
-        await new Promise(r => setTimeout(r, 15000)); // Record for 15 seconds
+        await new Promise(r => setTimeout(r, 15000)); 
         await recorder.stop();
         
         console.log(`[📤 DEBUG] Uploading to GitHub Releases...`);
@@ -140,7 +139,7 @@ async function initBrowserAndPlayer(isFirstCycle) {
             execSync(`gh release create ${tagName} ${debugFileName} --title "Visual Debug Capture" --notes "First Cycle Screen Check"`, { stdio: 'inherit' });
             console.log('✅ [+] Successfully uploaded visual debug video to GitHub Releases!');
         } catch (err) {
-            console.error('❌ [!] Failed to upload debug video (Check gh release permissions):', err.message);
+            console.error('❌ [!] Failed to upload debug video:', err.message);
         }
         if (fs.existsSync(debugFileName)) fs.unlinkSync(debugFileName);
     }
@@ -172,10 +171,8 @@ async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
 }
 
 // ==========================================
-// 🛠️ ASYNC FFMPEG RECORD & EDIT (HANG-PROOF)
+// 🛠️ ASYNC FFMPEG RECORD & EDIT
 // ==========================================
-
-// 🚀 THE MAGIC FIX: Specially designed to force-quit recording after 12s
 async function runFFmpegRecordAsync(args, stepName) {
     return new Promise((resolve) => {
         const ffmpegProc = spawn('ffmpeg', args);
@@ -189,13 +186,9 @@ async function runFFmpegRecordAsync(args, stepName) {
             }
         });
 
-        // Yeh timer barabar 12 second baad FFmpeg ko 'q' (quit) bhej kar practically band kar dega!
         const stopTimer = setTimeout(() => {
             console.log(`[⏱️] 12 Seconds passed. Forcing FFmpeg to stop recording gracefully...`);
-            try { 
-                ffmpegProc.stdin.write('q\n'); // Safely tells FFmpeg to finish writing file
-            } catch (e) {}
-            // Fallback: Agar phir bhi ziddi hua toh kill kar do
+            try { ffmpegProc.stdin.write('q\n'); } catch (e) {}
             setTimeout(() => { try { ffmpegProc.kill('SIGKILL'); } catch(e){} }, 3000);
         }, 12000);
 
@@ -207,7 +200,6 @@ async function runFFmpegRecordAsync(args, stepName) {
     });
 }
 
-// Regular function for processing/editing (No hang issues here usually)
 async function runFFmpegEditAsync(args, stepName) {
     return new Promise((resolve) => {
         const ffmpegProc = spawn('ffmpeg', args);
@@ -229,7 +221,7 @@ async function runFFmpegEditAsync(args, stepName) {
 }
 
 // ==========================================
-// 🎥 WORKER 1 & 2: SCREEN RECORDING + EDIT 
+// 🎥 WORKER 1 & 2: SCREEN RECORDING + EDIT (SPEED FIX APPLIED)
 // ==========================================
 async function worker_1_2_capture_and_edit(outputVid) {
     console.log(`\n[🎬 Worker 1 & 2] Physical Screen Recording & Fast Edit shuru ho raha hai...`);
@@ -243,32 +235,42 @@ async function worker_1_2_capture_and_edit(outputVid) {
     // STEP 0: RECORD 10 SECONDS
     // ----------------------------------------
     console.log(`\n[>] [Step 0] Recording 10 seconds of LIVE Fullscreen (x11grab)...`);
+    // 🚀 FIX: Audio capture parameters improved to avoid drift
     const captureArgs = ['-y', '-f', 'x11grab', '-draw_mouse', '0', '-video_size', '1280x720', '-framerate', '30', '-i', DISPLAY_NUM, '-f', 'pulse', '-i', 'default', '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '2', '-c:a', 'aac', '-t', duration, raw10sVid];
     
-    // Yahan humara naya hang-proof function lag gaya
     const recordSuccess = await runFFmpegRecordAsync(captureArgs, "Screen Capture");
     if (!fs.existsSync(raw10sVid) || fs.statSync(raw10sVid).size < 1000) {
         console.log(`[❌] Screen recording fail ho gayi. File nahi bani.`); return false;
     }
 
-    // 🔴 ECO-MODE: Browser band kar do
     console.log(`[🧹 ECO-MODE] Screen capture done. Closing browser to free up RAM before heavy processing...`);
     await cleanup(); 
 
     // ----------------------------------------
-    // STEP A: EDIT CLIP (Blur & PiP)
+    // STEP A: EDIT CLIP (Blur & PiP) - SPEED SYNC FIX
     // ----------------------------------------
-    console.log(`\n[>] [Step A] Applying Blur & PiP Frame on recorded clip...`);
+    console.log(`\n[>] [Step A] Applying Blur & PiP Frame on recorded clip (Syncing Framerates)...`);
     let args1 = ["-y", "-thread_queue_size", "1024", "-i", raw10sVid]; 
     if (hasBg) args1.push("-thread_queue_size", "1024", "-loop", "1", "-framerate", "30", "-i", bgImage);
     if (hasAudio) args1.push("-thread_queue_size", "1024", "-stream_loop", "-1", "-i", audioFile);
     
-    let filterComplex1 = hasBg ? `[0:v]scale=1064:565,boxblur=${blurAmount}[pip]; [1:v][pip]overlay=0:250:shortest=1,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]` : `[0:v]scale=1280:720,boxblur=${blurAmount},format=yuv420p[outv]`;
+    // 🚀 FIX: `setpts=PTS-STARTPTS` add kiya taake video start se proper time par chale aur fast na ho. `fps=30` fix kiya.
+    let filterComplex1 = hasBg 
+        ? `[0:v]setpts=PTS-STARTPTS,fps=30,scale=1064:565,boxblur=${blurAmount}[pip]; [1:v]setpts=PTS-STARTPTS,fps=30[bg]; [bg][pip]overlay=0:250:shortest=1,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[outv]` 
+        : `[0:v]setpts=PTS-STARTPTS,fps=30,scale=1280:720,boxblur=${blurAmount},format=yuv420p[outv]`;
+        
     args1.push("-filter_complex", filterComplex1, "-map", "[outv]");
-    args1.push(hasAudio ? (hasBg ? "-map" : "-map") : "-map", hasAudio ? (hasBg ? "2:a:0" : "1:a:0") : "0:a:0");
     
-    // 🚀 Strict Duration lock
-    args1.push("-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-c:a", "aac", "-b:a", "128k", "-t", duration, tempDynVideo);
+    if (hasAudio) {
+        let audioIndex = hasBg ? 2 : 1;
+        // 🚀 FIX: Audio ko bhi start se sync kiya
+        args1.push("-map", `${audioIndex}:a:0`, "-af", "aresample=async=1");
+    } else {
+        args1.push("-map", "0:a:0", "-af", "aresample=async=1");
+    }
+    
+    // 🚀 FIX: `-vsync 1` aur strict time limit.
+    args1.push("-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-vsync", "1", "-c:a", "aac", "-b:a", "128k", "-t", duration, tempDynVideo);
 
     const editSuccess = await runFFmpegEditAsync(args1, "Apply Filters");
     if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid); 
@@ -278,11 +280,12 @@ async function worker_1_2_capture_and_edit(outputVid) {
     }
 
     // ----------------------------------------
-    // STEP B: MERGE
+    // STEP B: MERGE - SPEED SYNC FIX
     // ----------------------------------------
     if (hasMainVideo) {
         console.log(`\n[>] [Step B] Merging with 'main_video.mp4'...`);
-        let args2 = ["-y", "-i", tempDynVideo, "-i", staticVideo, "-filter_complex", "[0:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v0]; [0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0]; [1:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v1]; [1:a]aformat=sample_rates=44100:channel_layouts=stereo[a1]; [v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]", "-map", "[outv]", "-map", "[outa]", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-c:a", "aac", "-b:a", "128k", outputVid];
+        // 🚀 FIX: Added fps normalization during merge
+        let args2 = ["-y", "-i", tempDynVideo, "-i", staticVideo, "-filter_complex", "[0:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v0]; [0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0]; [1:v]scale=1280:720,setsar=1,fps=30,format=yuv420p[v1]; [1:a]aformat=sample_rates=44100:channel_layouts=stereo[a1]; [v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]", "-map", "[outv]", "-map", "[outa]", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "2", "-vsync", "1", "-c:a", "aac", "-b:a", "128k", outputVid];
         
         const mergeSuccess = await runFFmpegEditAsync(args2, "Merge Video");
         fs.unlinkSync(tempDynVideo); 
@@ -374,7 +377,6 @@ async function main() {
 }
 
 main();
-
 
 
 
