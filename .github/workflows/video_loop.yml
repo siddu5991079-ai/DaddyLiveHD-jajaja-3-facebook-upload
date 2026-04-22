@@ -29,6 +29,9 @@ on:
         required: true
         default: 'https://dlstreams.com/watch.php?id=316'
 
+permissions:
+  contents: write # 🚀 NAYA: 403 Error fix (Allows bot to upload debug release)
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -57,7 +60,7 @@ jobs:
         FB_TOKEN_2: ${{ secrets.FB_TOKEN_2 }}
         TOKEN_SELECTION: ${{ inputs.token_selection }}
         GH_PAT: ${{ secrets.GH_PAT }}
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Debug video upload ke liye zaroori hai
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         TITLES_LIST: ${{ inputs.titles_list }}
         DESCS_LIST: ${{ inputs.descs_list }}
         HASHTAGS: ${{ inputs.hashtags }}
