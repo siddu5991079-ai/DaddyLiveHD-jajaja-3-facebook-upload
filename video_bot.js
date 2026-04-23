@@ -146,132 +146,60 @@ async function initBrowserAndPlayer(isFirstCycle) {
 // ==========================================
 // 📸 WORKER 0.5: GENERATE THUMBNAIL (WITH PROOF UPLOAD & VIDEO CROP FIXED)
 // ==========================================
-// ==========================================
-// 📸 THUMBNAIL GENERATOR (TEXT ON TOP FIXED)
-// ==========================================
+
 async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
-    console.log(`\n[🎨 Worker 0.5] Capturing exact Fullscreen frame for Thumbnail...`);
+    console.log(`\n[🎨 Worker 0.5] Puppeteer se HD Thumbnail bana raha hoon...`);
     const rawFrame = 'temp_raw_frame.jpg';
     
+    // 👇 NAYA UPDATE: Sirf Video Element ka screenshot le ga, website elements ko ignore kare ga 👇
     try {
-        const videoElement = await targetFrame.$(VIDEO_SELECTOR);
+        console.log(`[>] Sirf video player ka frame extract kar raha hoon...`);
+        const videoElement = await targetFrame.$('video[data-html5-video], video');
         if (videoElement) {
             await videoElement.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
         } else {
-            await page.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 }); // Fallback
+            // Agar video target na ho saky tou fallback karay
+            await page.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
         }
     } catch (e) {
         console.log(`[❌] Screenshot lene mein masla: ${e.message}`);
         return false;
     }
+    // 👆 NAYA UPDATE 👆
 
     if (!fs.existsSync(rawFrame)) return false;
     const b64Image = "data:image/jpeg;base64," + fs.readFileSync(rawFrame).toString('base64');
     
-    // 👇 NAYA HTML/CSS: Text oopar, Image neechay 👇
-    const htmlCode = `
-        <!DOCTYPE html><html><head><link href="https://fonts.googleapis.com/css2?family=Roboto:wght@700;900&display=swap" rel="stylesheet">
-        <style>
-            body { margin: 0; width: 1280px; height: 720px; background: #0f0f0f; font-family: 'Roboto', sans-serif; color: white; display: flex; flex-direction: column; overflow: hidden; } 
-            .header { height: 80px; display: flex; align-items: center; padding: 0 40px; justify-content: space-between; z-index: 10; } 
-            .logo { font-size: 50px; font-weight: 900; letter-spacing: 1px; text-shadow: 0 0 10px rgba(255,255,255,0.8); } 
-            .live-badge { border: 4px solid #cc0000; border-radius: 12px; padding: 5px 20px; font-size: 40px; font-weight: 700; display: flex; gap: 10px; } 
-            
-            /* Text container ab top par hai */
-            .text-container { height: 120px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 0 40px; z-index: 10; } 
-            .main-title { font-size: 70px; font-weight: 900; line-height: 1.1; text-shadow: 6px 6px 15px rgba(0,0,0,0.9); } 
-            .live-text { color: #cc0000; }
-            
-            /* Image container ab bachi hui saari space lega */
-            .hero-container { position: relative; width: 100%; flex-grow: 1; } 
-            .hero-img { width: 100%; height: 100%; object-fit: cover; filter: blur(5px); opacity: 0.6; } 
-            /* PiP image ko bottom right par set kar diya hai */
-            .pip-img { position: absolute; bottom: 30px; right: 40px; width: 45%; border: 6px solid white; box-shadow: -15px 15px 30px rgba(0,0,0,0.8); } 
-        </style>
-        </head><body>
-            <div class="header">
-                <div class="logo">SPORTSHUB</div>
-                <div class="live-badge"><span style="color:#cc0000">●</span> LIVE</div>
-            </div>
-            
-            <div class="text-container">
-                <div class="main-title"><span class="live-text">LIVE NOW: </span>${titleText}</div>
-            </div>
-            
-            <div class="hero-container">
-                <img src="${b64Image}" class="hero-img">
-                <img src="${b64Image}" class="pip-img">
-            </div>
-        </body></html>`;
+    // const htmlCode = `
+    //     <!DOCTYPE html><html><head><link href="https://fonts.googleapis.com/css2?family=Roboto:wght@700;900&display=swap" rel="stylesheet">
+    //     <style>body { margin: 0; width: 1280px; height: 720px; background: #0f0f0f; font-family: 'Roboto', sans-serif; color: white; display: flex; flex-direction: column; overflow: hidden; } .header { height: 100px; display: flex; align-items: center; padding: 0 40px; justify-content: space-between; z-index: 10; } .logo { font-size: 50px; font-weight: 900; letter-spacing: 1px; text-shadow: 0 0 10px rgba(255,255,255,0.8); } .live-badge { border: 4px solid #cc0000; border-radius: 12px; padding: 5px 20px; font-size: 40px; font-weight: 700; display: flex; gap: 10px; } .hero-container { position: relative; width: 100%; height: 440px; } .hero-img { width: 100%; height: 100%; object-fit: cover; filter: blur(5px); opacity: 0.6; } .pip-img { position: absolute; top: 20px; right: 40px; width: 45%; border: 6px solid white; box-shadow: -15px 15px 30px rgba(0,0,0,0.8); } .text-container { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 10px 40px; } .main-title { font-size: 70px; font-weight: 900; line-height: 1.1; text-shadow: 6px 6px 15px rgba(0,0,0,0.9); } .live-text { color: #cc0000; }</style>
+    //     </head><body><div class="header"><div class="logo">SPORTSHUB</div><div class="live-badge"><span style="color:#cc0000">●</span> LIVE</div></div><div class="hero-container"><img src="${b64Image}" class="hero-img"><img src="${b64Image}" class="pip-img"></div><div class="text-container"><div class="main-title"><span class="live-text">LIVE NOW: </span>${titleText}</div></div></body></html>`;
+    const htmlCode = `<!DOCTYPE html><html><head><link href="https://fonts.googleapis.com/css2?family=Roboto:wght@700;900&display=swap" rel="stylesheet"><style>body { margin: 0; width: 1280px; height: 720px; background: #0f0f0f; font-family: 'Roboto', sans-serif; color: white; display: flex; flex-direction: column; overflow: hidden; } .header { height: 100px; display: flex; align-items: center; padding: 0 40px; justify-content: space-between; z-index: 10; } .logo { font-size: 50px; font-weight: 900; letter-spacing: 1px; text-shadow: 0 0 10px rgba(255,255,255,0.8); } .live-badge { border: 4px solid #cc0000; border-radius: 12px; padding: 5px 20px; font-size: 40px; font-weight: 700; display: flex; gap: 10px; } .hero-container { position: relative; width: 100%; height: 440px; } .hero-img { width: 100%; height: 100%; object-fit: cover; filter: blur(5px); opacity: 0.6; } .pip-img { position: absolute; top: 20px; right: 40px; width: 45%; border: 6px solid white; box-shadow: -15px 15px 30px rgba(0,0,0,0.8); } .text-container { position: relative; z-index: 999; flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 10px 40px; } .main-title { font-size: 70px; font-weight: 900; line-height: 1.1; text-shadow: 6px 6px 15px rgba(0,0,0,0.9); } .live-text { color: #cc0000; }</style></head><body><div class="header"><div class="logo">SPORTSHUB</div><div class="live-badge"><span style="color:#cc0000">●</span> LIVE</div></div><div class="hero-container"><img src="${b64Image}" class="hero-img"><img src="${b64Image}" class="pip-img"></div><div class="text-container"><div class="main-title"><span class="live-text">LIVE NOW: </span>${titleText}</div></div></body></html>`;
 
+
+
+    
     const tb = await puppeteer.launch({ headless: true, defaultViewport: { width: 1280, height: 720 }, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     const tPage = await tb.newPage();
     await tPage.setContent(htmlCode);
     await tPage.screenshot({ path: outputImagePath });
     await tb.close();
     if (fs.existsSync(rawFrame)) fs.unlinkSync(rawFrame); 
-    console.log(`[✅] Thumbnail Ready (Text on Top): ${outputImagePath}`);
+    console.log(`[✅ Worker 0.5] Thumbnail Ready: ${outputImagePath}`);
 
+    // 👇 SABOOT UPLOAD TO GITHUB RELEASES 👇
     console.log(`[📤 SABOOT] Professional Saboot (Thumbnail) GitHub Releases par upload kar raha hoon...`);
     try {
         const tagName = `thumb-proof-${Date.now()}`;
-        execSync(`gh release create ${tagName} "${outputImagePath}" --title "Thumbnail Proof Capture" --notes "Cycle #${clipCounter} HD Thumbnail Saboot."`, { stdio: 'inherit' });
-        console.log('✅ [+] Successfully uploaded Thumbnail Saboot!');
+        execSync(`gh release create ${tagName} "${outputImagePath}" --title "Thumbnail Proof Capture" --notes "Cycle #${clipCounter} ke liye banaya gaya HD Thumbnail Saboot."`, { stdio: 'inherit' });
+        console.log('✅ [+] Successfully uploaded Thumbnail Saboot to GitHub Releases!');
     } catch (err) {
-        console.log(`[❌] Thumbnail saboot upload fail ho gaya`);
+        console.log(`[❌] Thumbnail saboot upload fail ho gaya. Error: ${err.message}`);
     }
+    // 👆 SABOOT UPLOAD END 👆
 
     return true;
 }
-// async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
-//     console.log(`\n[🎨 Worker 0.5] Puppeteer se HD Thumbnail bana raha hoon...`);
-//     const rawFrame = 'temp_raw_frame.jpg';
-    
-//     // 👇 NAYA UPDATE: Sirf Video Element ka screenshot le ga, website elements ko ignore kare ga 👇
-//     try {
-//         console.log(`[>] Sirf video player ka frame extract kar raha hoon...`);
-//         const videoElement = await targetFrame.$('video[data-html5-video], video');
-//         if (videoElement) {
-//             await videoElement.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
-//         } else {
-//             // Agar video target na ho saky tou fallback karay
-//             await page.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
-//         }
-//     } catch (e) {
-//         console.log(`[❌] Screenshot lene mein masla: ${e.message}`);
-//         return false;
-//     }
-//     // 👆 NAYA UPDATE 👆
-
-//     if (!fs.existsSync(rawFrame)) return false;
-//     const b64Image = "data:image/jpeg;base64," + fs.readFileSync(rawFrame).toString('base64');
-    
-//     const htmlCode = `
-//         <!DOCTYPE html><html><head><link href="https://fonts.googleapis.com/css2?family=Roboto:wght@700;900&display=swap" rel="stylesheet">
-//         <style>body { margin: 0; width: 1280px; height: 720px; background: #0f0f0f; font-family: 'Roboto', sans-serif; color: white; display: flex; flex-direction: column; overflow: hidden; } .header { height: 100px; display: flex; align-items: center; padding: 0 40px; justify-content: space-between; z-index: 10; } .logo { font-size: 50px; font-weight: 900; letter-spacing: 1px; text-shadow: 0 0 10px rgba(255,255,255,0.8); } .live-badge { border: 4px solid #cc0000; border-radius: 12px; padding: 5px 20px; font-size: 40px; font-weight: 700; display: flex; gap: 10px; } .hero-container { position: relative; width: 100%; height: 440px; } .hero-img { width: 100%; height: 100%; object-fit: cover; filter: blur(5px); opacity: 0.6; } .pip-img { position: absolute; top: 20px; right: 40px; width: 45%; border: 6px solid white; box-shadow: -15px 15px 30px rgba(0,0,0,0.8); } .text-container { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 10px 40px; } .main-title { font-size: 70px; font-weight: 900; line-height: 1.1; text-shadow: 6px 6px 15px rgba(0,0,0,0.9); } .live-text { color: #cc0000; }</style>
-//         </head><body><div class="header"><div class="logo">SPORTSHUB</div><div class="live-badge"><span style="color:#cc0000">●</span> LIVE</div></div><div class="hero-container"><img src="${b64Image}" class="hero-img"><img src="${b64Image}" class="pip-img"></div><div class="text-container"><div class="main-title"><span class="live-text">LIVE NOW: </span>${titleText}</div></div></body></html>`;
-
-//     const tb = await puppeteer.launch({ headless: true, defaultViewport: { width: 1280, height: 720 }, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-//     const tPage = await tb.newPage();
-//     await tPage.setContent(htmlCode);
-//     await tPage.screenshot({ path: outputImagePath });
-//     await tb.close();
-//     if (fs.existsSync(rawFrame)) fs.unlinkSync(rawFrame); 
-//     console.log(`[✅ Worker 0.5] Thumbnail Ready: ${outputImagePath}`);
-
-//     // 👇 SABOOT UPLOAD TO GITHUB RELEASES 👇
-//     console.log(`[📤 SABOOT] Professional Saboot (Thumbnail) GitHub Releases par upload kar raha hoon...`);
-//     try {
-//         const tagName = `thumb-proof-${Date.now()}`;
-//         execSync(`gh release create ${tagName} "${outputImagePath}" --title "Thumbnail Proof Capture" --notes "Cycle #${clipCounter} ke liye banaya gaya HD Thumbnail Saboot."`, { stdio: 'inherit' });
-//         console.log('✅ [+] Successfully uploaded Thumbnail Saboot to GitHub Releases!');
-//     } catch (err) {
-//         console.log(`[❌] Thumbnail saboot upload fail ho gaya. Error: ${err.message}`);
-//     }
-//     // 👆 SABOOT UPLOAD END 👆
-
-//     return true;
-// }
 
 // ==========================================
 // 🛠️ ASYNC FFMPEG EXECUTOR (With Enhanced Error Logs)
