@@ -144,12 +144,28 @@ async function initBrowserAndPlayer(isFirstCycle) {
 }
 
 // ==========================================
-// 📸 WORKER 0.5: GENERATE THUMBNAIL (WITH PROOF UPLOAD)
+// 📸 WORKER 0.5: GENERATE THUMBNAIL (WITH PROOF UPLOAD & VIDEO CROP FIXED)
 // ==========================================
 async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
     console.log(`\n[🎨 Worker 0.5] Puppeteer se HD Thumbnail bana raha hoon...`);
     const rawFrame = 'temp_raw_frame.jpg';
-    try { await page.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 }); } catch (e) { return false; }
+    
+    // 👇 NAYA UPDATE: Sirf Video Element ka screenshot le ga, website elements ko ignore kare ga 👇
+    try {
+        console.log(`[>] Sirf video player ka frame extract kar raha hoon...`);
+        const videoElement = await targetFrame.$('video[data-html5-video], video');
+        if (videoElement) {
+            await videoElement.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
+        } else {
+            // Agar video target na ho saky tou fallback karay
+            await page.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
+        }
+    } catch (e) {
+        console.log(`[❌] Screenshot lene mein masla: ${e.message}`);
+        return false;
+    }
+    // 👆 NAYA UPDATE 👆
+
     if (!fs.existsSync(rawFrame)) return false;
     const b64Image = "data:image/jpeg;base64," + fs.readFileSync(rawFrame).toString('base64');
     
@@ -166,7 +182,7 @@ async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
     if (fs.existsSync(rawFrame)) fs.unlinkSync(rawFrame); 
     console.log(`[✅ Worker 0.5] Thumbnail Ready: ${outputImagePath}`);
 
-    // 👇 NAYA HISSA (SABOOT UPLOAD TO GITHUB RELEASES) 👇
+    // 👇 SABOOT UPLOAD TO GITHUB RELEASES 👇
     console.log(`[📤 SABOOT] Professional Saboot (Thumbnail) GitHub Releases par upload kar raha hoon...`);
     try {
         const tagName = `thumb-proof-${Date.now()}`;
@@ -175,7 +191,7 @@ async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
     } catch (err) {
         console.log(`[❌] Thumbnail saboot upload fail ho gaya. Error: ${err.message}`);
     }
-    // 👆 NAYA HISSA 👆
+    // 👆 SABOOT UPLOAD END 👆
 
     return true;
 }
