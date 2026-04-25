@@ -242,7 +242,7 @@ main();
 
 
 
-# ====== yeh below vide upload karta hai facebook mei lekin kucj issue hai step1 complet karta hai box open karat hai title(description) bey write kardeta hai video mei post kar deta hai lekin wahat par video facebook naehy leta hai qunkysome issue pehely aap isko locally test karo, how to upload video on facebook manually through bot =========================
+// # ====== yeh below vide upload karta hai facebook mei lekin kucj issue hai step1 complet karta hai box open karat hai title(description) bey write kardeta hai video mei post kar deta hai lekin wahat par video facebook naehy leta hai qunkysome issue pehely aap isko locally test karo, how to upload video on facebook manually through bot =========================
 
 // const puppeteer = require('puppeteer-extra');
 // const StealthPlugin = require('puppeteer-extra-plugin-stealth');
