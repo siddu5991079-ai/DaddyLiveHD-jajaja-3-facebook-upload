@@ -42,12 +42,20 @@ jobs:
       with:
         node-version: '18'
 
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    # 🛑 YEH NAYA STEP HAI: Python ki library install karna
+    - name: Install Python Libraries
+      run: pip install DrissionPage
+
     - name: Install Node Libraries
       run: npm install puppeteer puppeteer-extra puppeteer-extra-plugin-stealth puppeteer-screen-recorder axios form-data
 
     - name: Start The Hybrid Bot
       env:
-        # NAYA: FB_COOKIES aapke GitHub Secrets se uthaya jayega
         FB_COOKIES: ${{ secrets.FB_COOKIES }}
         GH_PAT: ${{ secrets.GH_PAT }}
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,14 +66,95 @@ jobs:
         GITHUB_REPOSITORY: ${{ github.repository }}
         GITHUB_REF_NAME: ${{ github.ref_name }}
       run: |
-        # PulseAudio ko properly start karna (Freeze/Crash se bachanay ke liye)
         pulseaudio --start --exit-idle-time=-1
         pacmd load-module module-virtual-sink sink_name=v1
         pacmd set-default-sink v1
         pacmd set-default-source v1.monitor
         
-        # xvfb-run ke sath 'grep --line-buffered' lagaya hai taake logs real-time mein show hon
         xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node video_bot.js 2>&1 | grep --line-buffered -vE "XKEYBOARD|XF86|xkbcomp|not fatal"
+
+
+
+
+        
+
+
+
+
+
+
+
+
+
+
+# name: Ultimate Hybrid Video Bot
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       titles_list:
+#         description: 'Titles Array (Separate with ,,)'
+#         required: true
+#         default: 'Delhi Capitals vs Gujarat Titans Live Match Today,,Blockbuster Match DC vs GT'
+#       descs_list:
+#         description: 'Descriptions Array (Separate with ,,)'
+#         required: true
+#         default: 'DC take on GT in the latest IPL match. Watch the live action here without buffer,,The best IPL teams DC and GT face off!'
+#       hashtags:
+#         description: 'Hashtags (Space separated)'
+#         required: true
+#         default: '#IPL2026 #DCvsGT #DelhiCapitals #GujaratTitans #IPLLive #LiveMatch'
+#       target_url:
+#         description: 'Target Website URL'
+#         required: true
+#         default: 'https://dlstreams.com/watch.php?id=316'
+
+# permissions:
+#   contents: write
+
+# jobs:
+#   run-bot:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 360 
+
+#     steps:
+#     - name: Checkout Code
+#       uses: actions/checkout@v3
+
+#     - name: Install System Tools (FFmpeg, Chrome, PulseAudio)
+#       run: |
+#         sudo apt-get update
+#         sudo apt-get install -y ffmpeg google-chrome-stable xvfb pulseaudio dbus-x11
+
+#     - name: Setup Node.js
+#       uses: actions/setup-node@v3
+#       with:
+#         node-version: '18'
+
+#     - name: Install Node Libraries
+#       run: npm install puppeteer puppeteer-extra puppeteer-extra-plugin-stealth puppeteer-screen-recorder axios form-data
+
+#     - name: Start The Hybrid Bot
+#       env:
+#         # NAYA: FB_COOKIES aapke GitHub Secrets se uthaya jayega
+#         FB_COOKIES: ${{ secrets.FB_COOKIES }}
+#         GH_PAT: ${{ secrets.GH_PAT }}
+#         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#         TITLES_LIST: ${{ inputs.titles_list }}
+#         DESCS_LIST: ${{ inputs.descs_list }}
+#         HASHTAGS: ${{ inputs.hashtags }}
+#         TARGET_URL: ${{ inputs.target_url }}
+#         GITHUB_REPOSITORY: ${{ github.repository }}
+#         GITHUB_REF_NAME: ${{ github.ref_name }}
+#       run: |
+#         # PulseAudio ko properly start karna (Freeze/Crash se bachanay ke liye)
+#         pulseaudio --start --exit-idle-time=-1
+#         pacmd load-module module-virtual-sink sink_name=v1
+#         pacmd set-default-sink v1
+#         pacmd set-default-source v1.monitor
+        
+#         # xvfb-run ke sath 'grep --line-buffered' lagaya hai taake logs real-time mein show hon
+#         xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node video_bot.js 2>&1 | grep --line-buffered -vE "XKEYBOARD|XF86|xkbcomp|not fatal"
 
         
 
