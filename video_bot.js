@@ -5,8 +5,10 @@ puppeteer.use(StealthPlugin());
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const axios = require('axios'); 
-const { PuppeteerScreenRecorder } = require('puppeteer-screen-recorder');
 
+// ==========================================
+// ⚙️ SETTINGS & ENVIRONMENT VARIABLES
+// ==========================================
 const TARGET_URL = process.env.TARGET_URL || 'https://dlstreams.com/watch.php?id=316';
 const TITLES_INPUT = process.env.TITLES_LIST || 'Live Match Today,,Watch Full Match DC vs GT';
 const DESCS_INPUT = process.env.DESCS_LIST || 'Watch the live action here';
@@ -41,7 +43,10 @@ function generateMetadata(clipNum) {
     return { title: finalTitle, desc: finalDesc };
 }
 
-async function initBrowserAndPlayer(isFirstCycle) {
+// =========================================================================
+// 🌐 SETUP BROWSER
+// =========================================================================
+async function initBrowserAndPlayer() {
     console.log(`\n[*] Starting FRESH browser instance...`);
     browser = await puppeteer.launch({
         channel: 'chrome', headless: false, 
@@ -82,18 +87,20 @@ async function initBrowserAndPlayer(isFirstCycle) {
         const video = document.querySelector('video[data-html5-video]') || document.querySelector('video');
         if (video) { video.volume = 1.0; await video.play().catch(e => {}); }
     });
-
-    await targetFrame.evaluate(async () => {
-        const vid = document.querySelector('video[data-html5-video]') || document.querySelector('video');
-        if (!vid) return;
-        try { if (vid.requestFullscreen) await vid.requestFullscreen(); else if (vid.webkitRequestFullscreen) await vid.webkitRequestFullscreen(); } 
-        catch (err) { vid.style.position = 'fixed'; vid.style.top = '0'; vid.style.left = '0'; vid.style.width = '100vw'; vid.style.height = '100vh'; vid.style.zIndex = '2147483647'; vid.style.backgroundColor = 'black'; }
-    });
 }
 
-async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
-    console.log(`\n[🎨 Worker 0.5] Puppeteer se HD Thumbnail bana raha hoon...`);
+// ==========================================
+// 📸 THUMBNAIL GENERATOR (TITLE KE NAAM SE SAVE KAREGA)
+// ==========================================
+async function worker_generate_thumbnail(titleText) {
+    console.log(`\n[🎨] Puppeteer se HD Thumbnail bana raha hoon...`);
     const rawFrame = 'temp_raw_frame.jpg';
+    
+    // 🛑 TITLE KO SAFE FILE NAME BANANA (A-Z, 0-9 aur space allow hai bas)
+    let safeTitleName = titleText.replace(/[^a-zA-Z0-9 ]/g, "").trim().substring(0, 80);
+    if (!safeTitleName) safeTitleName = `Live_Match_${Date.now()}`;
+    const finalImageName = `${safeTitleName}.png`;
+
     try {
         const videoElement = await targetFrame.$('video[data-html5-video], video');
         if (videoElement) await videoElement.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
@@ -107,66 +114,39 @@ async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
     const tb = await puppeteer.launch({ headless: true, defaultViewport: { width: 1280, height: 720 }, args: ['--no-sandbox'] });
     const tPage = await tb.newPage();
     await tPage.setContent(htmlCode);
-    await tPage.screenshot({ path: outputImagePath });
+    
+    // IMAGE KO TITLE KE NAAM SE SAVE KAR RAHA HAI
+    await tPage.screenshot({ path: finalImageName });
     await tb.close();
     if (fs.existsSync(rawFrame)) fs.unlinkSync(rawFrame); 
     
-    try {
-        const tagName = `thumb-proof-${Date.now()}`;
-        execSync(`gh release create ${tagName} "${outputImagePath}" --title "Thumbnail Proof Capture" --notes "Cycle #${clipCounter} Thumbnail Saboot."`, { stdio: 'inherit' });
-    } catch (err) {}
-    return true;
-}
-
-async function runFFmpegEditAsync(args, stepName) {
-    return new Promise((resolve) => {
-        const ffmpegProc = spawn('ffmpeg', args);
-        ffmpegProc.on('close', (code) => { resolve(code === 0); });
-    });
-}
-
-async function worker_1_2_capture_and_edit(outputVid) {
-    console.log(`\n[🎬 Worker 1 & 2] Puppeteer Recording & Fast Edit shuru ho raha hai...`);
-    const raw10sVid = `raw_screen_${Date.now()}.mp4`; 
-    try {
-        const recorder = new PuppeteerScreenRecorder(page, { fps: 30 });
-        await recorder.start(raw10sVid);
-        await new Promise(r => setTimeout(r, 10000)); 
-        await recorder.stop();
-    } catch (e) { return false; }
-
-    await cleanup(); 
-
-    console.log(`\n[>] Editing video...`);
-    let args1 = ["-y", "-i", raw10sVid, "-vf", "scale=1280:720,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", "-t", "10", outputVid];
-    const editSuccess = await runFFmpegEditAsync(args1, "Apply Filters");
-    if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid); 
-    return editSuccess && fs.existsSync(outputVid);
+    console.log(`[✅] Image Ready aur Save ho gayi hai: ${finalImageName}`);
+    return finalImageName;
 }
 
 // ==========================================
-// 📤 WORKER 3: PYTHON SCRIPT CALL WITH FFMPEG RECORDING
+// 📤 UPLOAD WORKER: PYTHON SCRIPT CALL WITH FFMPEG RECORDING
 // ==========================================
-async function worker_3_upload(videoPath, thumbPath, title, desc, clipNum) {
-    console.log(`\n[📤 Worker 3] Upload Data ready hai. Python DrissionPage script ko bula rahe hain...`);
+async function worker_upload(imagePath, title, desc, clipNum) {
+    console.log(`\n[📤] Upload Data ready hai. Python DrissionPage script ko bula rahe hain...`);
     
-    // Python script ko data dene k liye JSON banayen
-    const postData = { video_path: videoPath, thumb_path: thumbPath, title: title, desc: desc };
+    // Python script ko image ka naam aur text dena
+    const postData = { image_path: imagePath, title: title, desc: desc };
     fs.writeFileSync('post_data.json', JSON.stringify(postData), 'utf-8');
 
-    // SABOOT KE LIYE FFMPEG SCREEN RECORDING (Virtual Xvfb Screen ki full recording)
+    // SABOOT KE LIYE FFMPEG SCREEN RECORDING
     let proofVideoName = `upload_proof_cycle_${clipNum}_${Date.now()}.mp4`;
     console.log(`[🎥] Saboot Recording Start: ${proofVideoName}`);
     
     const displayNum = process.env.DISPLAY || ':99';
     const ffmpegArgs = [
-        '-y', '-video_size', '1280x720', '-framerate', '30',
+        '-y', '-video_size', '1920x1080', '-framerate', '30',
         '-f', 'x11grab', '-i', displayNum,
         '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
         proofVideoName
     ];
     let ffmpegProc = spawn('ffmpeg', ffmpegArgs);
-    await new Promise(r => setTimeout(r, 2000)); // Recording start hone ka waqt dein
+    await new Promise(r => setTimeout(r, 2000)); 
 
     // 🚀 PYTHON SCRIPT RUN KAREIN
     try {
@@ -181,41 +161,36 @@ async function worker_3_upload(videoPath, thumbPath, title, desc, clipNum) {
     console.log(`[🎥] Saboot Recording stop kar rahe hain...`);
     try {
         ffmpegProc.kill('SIGINT');
-        await new Promise(r => setTimeout(r, 4000)); // Video save hone dein
+        await new Promise(r => setTimeout(r, 4000)); 
     } catch(e){}
 
-    // UPLOAD VIDEO TO GITHUB RELEASES
+    // UPLOAD VIDEO SABOOT TO GITHUB RELEASES
     if (fs.existsSync(proofVideoName)) {
-        console.log(`[📤 SABOOT] Upload Proof Video GitHub Releases par upload ho rahi hai...`);
+        console.log(`[📤 SABOOT] Upload Proof Video GitHub Releases par bhej raha hoon...`);
         try {
             const tagName = `upload-proof-${Date.now()}`;
-            execSync(`gh release create ${tagName} "${proofVideoName}" --title "Upload Proof Cycle #${clipNum}" --notes "Facebook Python web automation upload ka saboot."`, { stdio: 'inherit' });
-            console.log('✅ [+] Successfully uploaded Video Saboot to GitHub Releases!');
+            execSync(`gh release create ${tagName} "${proofVideoName}" --title "Upload Proof Cycle #${clipNum}" --notes "Facebook Python Image upload ka saboot."`, { stdio: 'inherit' });
+            console.log('✅ [+] Successfully uploaded Video Saboot!');
         } catch (err) {
             console.log(`[❌] Upload proof upload fail ho gaya.`);
         }
         try { fs.unlinkSync(proofVideoName); } catch(e){}
     }
+    
     try { fs.unlinkSync('post_data.json'); } catch(e){}
-
     return true;
 }
 
 // ==========================================
-// 🚀 CRASH MANAGER & MAIN HYBRID LOOP
+// 🚀 CRASH MANAGER & MAIN LOOP
 // ==========================================
 async function cleanup() {
     if (browser) { try { await browser.close(); } catch (e) { } browser = null; page = null; targetFrame = null; }
 }
 
-async function triggerNextRun() {
-    const token = process.env.GH_PAT, repo = process.env.GITHUB_REPOSITORY, branch = process.env.GITHUB_REF_NAME || 'main'; if (!token || !repo) return;
-    try { await axios.post(`https://api.github.com/repos/${repo}/actions/workflows/video_loop.yml/dispatches`, { ref: branch, inputs: { target_url: TARGET_URL, titles_list: TITLES_INPUT, descs_list: DESCS_INPUT, hashtags: HASHTAGS } }, { headers: { 'Authorization': `token ${token}` } }); console.log(`\n[🔄 AUTO-RESTART] Naya bot trigger kar diya gaya!`); } catch (e) { }
-}
-
 async function main() {
     console.log("\n==================================================");
-    console.log(`   🚀 HYBRID BOT (PYTHON DRISSIONPAGE UPLOADER)`);
+    console.log(`   🚀 HYBRID BOT (IMAGE UPLOADER)`);
     console.log(`   ⏰ STARTED AT: ${formatPKT()}`);
     console.log("==================================================");
 
@@ -223,27 +198,31 @@ async function main() {
 
     while (true) {
         const elapsedTimeMs = Date.now() - START_TIME;
-        console.log(`\n--- 🔄 STARTING VIDEO CYCLE #${clipCounter} ---`);
-        if (elapsedTimeMs > RESTART_TRIGGER_MS && !nextRunTriggered) { await triggerNextRun(); nextRunTriggered = true; }
+        console.log(`\n--- 🔄 STARTING CYCLE #${clipCounter} ---`);
+        
         if (elapsedTimeMs > END_TIME_LIMIT_MS) { process.exit(0); }
 
         const meta = generateMetadata(clipCounter);
-        const thumbFile = `studio_thumb_${clipCounter}.png`;
-        const finalVidFile = `final_${clipCounter}.mp4`;
 
         try {
-            await initBrowserAndPlayer(clipCounter === 1); 
-            await worker_0_5_generate_thumbnail(meta.title, thumbFile);
+            await initBrowserAndPlayer(); 
+            // Thumbnail banayega aur uska naam 'title.png' rakhega
+            const generatedImageName = await worker_generate_thumbnail(meta.title);
             
-            if (await worker_1_2_capture_and_edit(finalVidFile)) {
-                await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc, clipCounter);
+            // Browser band kar dena taake RAM free ho aur Python use kar sakay
+            await cleanup();
+
+            if (generatedImageName && fs.existsSync(generatedImageName)) {
+                await worker_upload(generatedImageName, meta.title, meta.desc, clipCounter);
+                
+                // Upload hone ke baad image delete kardo
+                try { fs.unlinkSync(generatedImageName); } catch(e){}
             }
         } catch (err) {
             console.error(`\n[!] CRASH DETECTED IN CYCLE #${clipCounter}: ${err.message}`);
         } finally {
             await cleanup();
-            [thumbFile, finalVidFile].forEach(f => { if (fs.existsSync(f)) { fs.unlinkSync(f); } });
-            console.log(`\n[⏳] Cycle #${clipCounter} Mukammal! Aglay round tak 5 min wait...`);
+            console.log(`\n[⏳] Cycle #${clipCounter} Mukammal! Aglay round tak wait...`);
             clipCounter++;
             await new Promise(r => setTimeout(r, WAIT_TIME_MS)); 
         }
@@ -257,6 +236,274 @@ main();
 
 
 
+
+
+
+
+
+
+# ====== yeh below vide upload karta hai facebook mei lekin kucj issue hai step1 complet karta hai box open karat hai title(description) bey write kardeta hai video mei post kar deta hai lekin wahat par video facebook naehy leta hai qunkysome issue pehely aap isko locally test karo, how to upload video on facebook manually through bot =========================
+
+// const puppeteer = require('puppeteer-extra');
+// const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+// puppeteer.use(StealthPlugin());
+
+// const { spawn, execSync } = require('child_process');
+// const fs = require('fs');
+// const axios = require('axios'); 
+// const { PuppeteerScreenRecorder } = require('puppeteer-screen-recorder');
+
+// const TARGET_URL = process.env.TARGET_URL || 'https://dlstreams.com/watch.php?id=316';
+// const TITLES_INPUT = process.env.TITLES_LIST || 'Live Match Today,,Watch Full Match DC vs GT';
+// const DESCS_INPUT = process.env.DESCS_LIST || 'Watch the live action here';
+// const HASHTAGS = process.env.HASHTAGS || '#IPL2026 #DCvsGT #CricketLovers #LiveMatch';
+// const WAIT_TIME_MS = 300 * 1000; 
+// const START_TIME = Date.now();
+// const RESTART_TRIGGER_MS = (5 * 60 * 60 + 30 * 60) * 1000; 
+// const END_TIME_LIMIT_MS = (5 * 60 * 60 + 50 * 60) * 1000; 
+
+// let clipCounter = 1;
+// let browser = null;
+// let page = null;
+// let targetFrame = null;
+
+// function formatPKT(timestampMs = Date.now()) {
+//     return new Date(timestampMs).toLocaleString('en-US', {
+//         timeZone: 'Asia/Karachi', hour12: true, year: 'numeric', month: 'short',
+//         day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
+//     }) + " PKT";
+// }
+
+// function generateMetadata(clipNum) {
+//     const titles = TITLES_INPUT.split(',,').map(t => t.trim()).filter(t => t);
+//     const descs = DESCS_INPUT.split(',,').map(d => d.trim()).filter(d => d);
+//     const title = titles.length ? titles[Math.floor(Math.random() * titles.length)] : "Live Match";
+//     const descBody = descs.length ? descs[Math.floor(Math.random() * descs.length)] : "Watch live!";
+//     const emojis = ["🔥", "🏏", "⚡", "🏆", "💥", "😱", "📺", "🚀"].sort(() => 0.5 - Math.random()).slice(0, 3);
+//     const tags = HASHTAGS.split(' ').sort(() => 0.5 - Math.random()).slice(0, 4).join(' ');
+    
+//     const finalTitle = title.substring(0, 240); 
+//     const finalDesc = `${finalTitle} ${emojis.join(' ')}\n\n${descBody}\n\n⏱️ Update: ${formatPKT()}\n👇 Watch Full Match Link in First Comment!\n\n${tags}`;
+//     return { title: finalTitle, desc: finalDesc };
+// }
+
+// async function initBrowserAndPlayer(isFirstCycle) {
+//     console.log(`\n[*] Starting FRESH browser instance...`);
+//     browser = await puppeteer.launch({
+//         channel: 'chrome', headless: false, 
+//         defaultViewport: { width: 1280, height: 720 },
+//         ignoreDefaultArgs: ['--enable-automation'], 
+//         args: [ '--no-sandbox', '--disable-setuid-sandbox', '--window-size=1280,720', '--kiosk', '--autoplay-policy=no-user-gesture-required', '--mute-audio' ]
+//     });
+//     page = await browser.newPage();
+//     const pages = await browser.pages();
+//     for (const p of pages) if (p !== page) await p.close();
+
+//     console.log(`[*] Navigating to target URL: ${TARGET_URL}...`);
+//     await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+//     await new Promise(r => setTimeout(r, 10000)); 
+
+//     for (const frame of page.frames()) {
+//         try {
+//             const isRealLiveStream = await frame.evaluate(() => {
+//                 const vid = document.querySelector('video[data-html5-video]') || document.querySelector('video');
+//                 return vid && vid.clientWidth > 300; 
+//             });
+//             if (isRealLiveStream) {
+//                 targetFrame = frame;
+//                 await frame.evaluate(() => { const fAd = document.getElementById('floated'); if (fAd) fAd.remove(); });
+//             }
+//         } catch (e) { }
+//     }
+//     if (!targetFrame) throw new Error('No <video> element could be found.');
+
+//     try {
+//         const iframeEl = await targetFrame.frameElement();
+//         const box = await iframeEl.boundingBox();
+//         if (box) await page.mouse.click(box.x + (box.width / 2), box.y + (box.height / 2), { delay: 100 });
+//         await new Promise(r => setTimeout(r, 2000));
+//     } catch (e) { }
+
+//     await targetFrame.evaluate(async () => {
+//         const video = document.querySelector('video[data-html5-video]') || document.querySelector('video');
+//         if (video) { video.volume = 1.0; await video.play().catch(e => {}); }
+//     });
+
+//     await targetFrame.evaluate(async () => {
+//         const vid = document.querySelector('video[data-html5-video]') || document.querySelector('video');
+//         if (!vid) return;
+//         try { if (vid.requestFullscreen) await vid.requestFullscreen(); else if (vid.webkitRequestFullscreen) await vid.webkitRequestFullscreen(); } 
+//         catch (err) { vid.style.position = 'fixed'; vid.style.top = '0'; vid.style.left = '0'; vid.style.width = '100vw'; vid.style.height = '100vh'; vid.style.zIndex = '2147483647'; vid.style.backgroundColor = 'black'; }
+//     });
+// }
+
+// async function worker_0_5_generate_thumbnail(titleText, outputImagePath) {
+//     console.log(`\n[🎨 Worker 0.5] Puppeteer se HD Thumbnail bana raha hoon...`);
+//     const rawFrame = 'temp_raw_frame.jpg';
+//     try {
+//         const videoElement = await targetFrame.$('video[data-html5-video], video');
+//         if (videoElement) await videoElement.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
+//         else await page.screenshot({ path: rawFrame, type: 'jpeg', quality: 90 });
+//     } catch (e) { return false; }
+//     if (!fs.existsSync(rawFrame)) return false;
+
+//     const b64Image = "data:image/jpeg;base64," + fs.readFileSync(rawFrame).toString('base64');
+//     const htmlCode = `<!DOCTYPE html><html><head><style>body { margin: 0; width: 1280px; height: 720px; background: #0f0f0f; font-family: sans-serif; color: white; display: flex; flex-direction: column; overflow: hidden; } .hero-container { position: relative; width: 100%; height: 440px; } .hero-img { width: 100%; height: 100%; object-fit: cover; filter: blur(5px); opacity: 0.6; } .pip-img { position: absolute; top: 20px; right: 40px; width: 45%; border: 6px solid white; box-shadow: -15px 15px 30px rgba(0,0,0,0.8); } .text-container { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 10px 40px; font-size: 70px; font-weight: 900; }</style></head><body><div class="hero-container"><img src="${b64Image}" class="hero-img"><img src="${b64Image}" class="pip-img"></div><div class="text-container">LIVE NOW: ${titleText}</div></body></html>`;
+
+//     const tb = await puppeteer.launch({ headless: true, defaultViewport: { width: 1280, height: 720 }, args: ['--no-sandbox'] });
+//     const tPage = await tb.newPage();
+//     await tPage.setContent(htmlCode);
+//     await tPage.screenshot({ path: outputImagePath });
+//     await tb.close();
+//     if (fs.existsSync(rawFrame)) fs.unlinkSync(rawFrame); 
+    
+//     try {
+//         const tagName = `thumb-proof-${Date.now()}`;
+//         execSync(`gh release create ${tagName} "${outputImagePath}" --title "Thumbnail Proof Capture" --notes "Cycle #${clipCounter} Thumbnail Saboot."`, { stdio: 'inherit' });
+//     } catch (err) {}
+//     return true;
+// }
+
+// async function runFFmpegEditAsync(args, stepName) {
+//     return new Promise((resolve) => {
+//         const ffmpegProc = spawn('ffmpeg', args);
+//         ffmpegProc.on('close', (code) => { resolve(code === 0); });
+//     });
+// }
+
+// async function worker_1_2_capture_and_edit(outputVid) {
+//     console.log(`\n[🎬 Worker 1 & 2] Puppeteer Recording & Fast Edit shuru ho raha hai...`);
+//     const raw10sVid = `raw_screen_${Date.now()}.mp4`; 
+//     try {
+//         const recorder = new PuppeteerScreenRecorder(page, { fps: 30 });
+//         await recorder.start(raw10sVid);
+//         await new Promise(r => setTimeout(r, 10000)); 
+//         await recorder.stop();
+//     } catch (e) { return false; }
+
+//     await cleanup(); 
+
+//     console.log(`\n[>] Editing video...`);
+//     let args1 = ["-y", "-i", raw10sVid, "-vf", "scale=1280:720,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k", "-t", "10", outputVid];
+//     const editSuccess = await runFFmpegEditAsync(args1, "Apply Filters");
+//     if (fs.existsSync(raw10sVid)) fs.unlinkSync(raw10sVid); 
+//     return editSuccess && fs.existsSync(outputVid);
+// }
+
+// // ==========================================
+// // 📤 WORKER 3: PYTHON SCRIPT CALL WITH FFMPEG RECORDING
+// // ==========================================
+// async function worker_3_upload(videoPath, thumbPath, title, desc, clipNum) {
+//     console.log(`\n[📤 Worker 3] Upload Data ready hai. Python DrissionPage script ko bula rahe hain...`);
+    
+//     // Python script ko data dene k liye JSON banayen
+//     const postData = { video_path: videoPath, thumb_path: thumbPath, title: title, desc: desc };
+//     fs.writeFileSync('post_data.json', JSON.stringify(postData), 'utf-8');
+
+//     // SABOOT KE LIYE FFMPEG SCREEN RECORDING (Virtual Xvfb Screen ki full recording)
+//     let proofVideoName = `upload_proof_cycle_${clipNum}_${Date.now()}.mp4`;
+//     console.log(`[🎥] Saboot Recording Start: ${proofVideoName}`);
+    
+//     const displayNum = process.env.DISPLAY || ':99';
+//     const ffmpegArgs = [
+//         '-y', '-video_size', '1280x720', '-framerate', '30',
+//         '-f', 'x11grab', '-i', displayNum,
+//         '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+//         proofVideoName
+//     ];
+//     let ffmpegProc = spawn('ffmpeg', ffmpegArgs);
+//     await new Promise(r => setTimeout(r, 2000)); // Recording start hone ka waqt dein
+
+//     // 🚀 PYTHON SCRIPT RUN KAREIN
+//     try {
+//         console.log("---------------- PYTHON DRISSIONPAGE LOGS ----------------");
+//         execSync('python facebook_upload.py', { stdio: 'inherit' });
+//         console.log("----------------------------------------------------------");
+//     } catch (error) {
+//         console.log(`[❌] Python script mein error aaya: ${error.message}`);
+//     }
+
+//     // RECORDING STOP KAREIN
+//     console.log(`[🎥] Saboot Recording stop kar rahe hain...`);
+//     try {
+//         ffmpegProc.kill('SIGINT');
+//         await new Promise(r => setTimeout(r, 4000)); // Video save hone dein
+//     } catch(e){}
+
+//     // UPLOAD VIDEO TO GITHUB RELEASES
+//     if (fs.existsSync(proofVideoName)) {
+//         console.log(`[📤 SABOOT] Upload Proof Video GitHub Releases par upload ho rahi hai...`);
+//         try {
+//             const tagName = `upload-proof-${Date.now()}`;
+//             execSync(`gh release create ${tagName} "${proofVideoName}" --title "Upload Proof Cycle #${clipNum}" --notes "Facebook Python web automation upload ka saboot."`, { stdio: 'inherit' });
+//             console.log('✅ [+] Successfully uploaded Video Saboot to GitHub Releases!');
+//         } catch (err) {
+//             console.log(`[❌] Upload proof upload fail ho gaya.`);
+//         }
+//         try { fs.unlinkSync(proofVideoName); } catch(e){}
+//     }
+//     try { fs.unlinkSync('post_data.json'); } catch(e){}
+
+//     return true;
+// }
+
+// // ==========================================
+// // 🚀 CRASH MANAGER & MAIN HYBRID LOOP
+// // ==========================================
+// async function cleanup() {
+//     if (browser) { try { await browser.close(); } catch (e) { } browser = null; page = null; targetFrame = null; }
+// }
+
+// async function triggerNextRun() {
+//     const token = process.env.GH_PAT, repo = process.env.GITHUB_REPOSITORY, branch = process.env.GITHUB_REF_NAME || 'main'; if (!token || !repo) return;
+//     try { await axios.post(`https://api.github.com/repos/${repo}/actions/workflows/video_loop.yml/dispatches`, { ref: branch, inputs: { target_url: TARGET_URL, titles_list: TITLES_INPUT, descs_list: DESCS_INPUT, hashtags: HASHTAGS } }, { headers: { 'Authorization': `token ${token}` } }); console.log(`\n[🔄 AUTO-RESTART] Naya bot trigger kar diya gaya!`); } catch (e) { }
+// }
+
+// async function main() {
+//     console.log("\n==================================================");
+//     console.log(`   🚀 HYBRID BOT (PYTHON DRISSIONPAGE UPLOADER)`);
+//     console.log(`   ⏰ STARTED AT: ${formatPKT()}`);
+//     console.log("==================================================");
+
+//     let nextRunTriggered = false;
+
+//     while (true) {
+//         const elapsedTimeMs = Date.now() - START_TIME;
+//         console.log(`\n--- 🔄 STARTING VIDEO CYCLE #${clipCounter} ---`);
+//         if (elapsedTimeMs > RESTART_TRIGGER_MS && !nextRunTriggered) { await triggerNextRun(); nextRunTriggered = true; }
+//         if (elapsedTimeMs > END_TIME_LIMIT_MS) { process.exit(0); }
+
+//         const meta = generateMetadata(clipCounter);
+//         const thumbFile = `studio_thumb_${clipCounter}.png`;
+//         const finalVidFile = `final_${clipCounter}.mp4`;
+
+//         try {
+//             await initBrowserAndPlayer(clipCounter === 1); 
+//             await worker_0_5_generate_thumbnail(meta.title, thumbFile);
+            
+//             if (await worker_1_2_capture_and_edit(finalVidFile)) {
+//                 await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc, clipCounter);
+//             }
+//         } catch (err) {
+//             console.error(`\n[!] CRASH DETECTED IN CYCLE #${clipCounter}: ${err.message}`);
+//         } finally {
+//             await cleanup();
+//             [thumbFile, finalVidFile].forEach(f => { if (fs.existsSync(f)) { fs.unlinkSync(f); } });
+//             console.log(`\n[⏳] Cycle #${clipCounter} Mukammal! Aglay round tak 5 min wait...`);
+//             clipCounter++;
+//             await new Promise(r => setTimeout(r, WAIT_TIME_MS)); 
+//         }
+//     }
+// }
+
+// main();
+
+
+
+
+
+
+// # ====== yeh below vide upload karta hai facebook mei lekin kucj issue hai step1 complet karta hai box open karat hai title(description) bey write kardeta hai video mei post kar deta hai lekin wahat par video facebook naehy leta hai qunkysome issue pehely aap isko locally test karo, how to upload video on facebook manually through bot, iss mei bey same issue hai lekin yeh sab kuch akelaa karta hai iskoo facebook_upload.py file k zaroorat nahey  =========================
 
 
 // const puppeteer = require('puppeteer-extra');
