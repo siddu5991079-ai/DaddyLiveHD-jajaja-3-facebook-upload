@@ -283,10 +283,10 @@ async function worker_1_2_capture_and_edit(outputVid) {
 }
 
 // ==========================================
-// 📤 WORKER 3: EXACT PROJECT 1 WEB AUTOMATION LOGIC (NO API)
+// 📤 WORKER 3: EXACT PROJECT 1 WEB AUTOMATION LOGIC (WITH RECORDING & EXTENDED WAIT)
 // ==========================================
-async function worker_3_upload(videoPath, thumbPath, title, desc) {
-    console.log(`\n[📤 Worker 3] Facebook Web Automation Upload (Project 1 Exact Logic)`);
+async function worker_3_upload(videoPath, thumbPath, title, desc, clipNum) {
+    console.log(`\n[📤 Worker 3] Facebook Web Automation Upload (Cycle #${clipNum})`);
     
     const cookiesJson = process.env.FB_COOKIES;
     if (!cookiesJson) {
@@ -319,7 +319,16 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
     const fbPage = await fbBrowser.newPage();
     await fbPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
+    // 🎥 SABOOT KE LIYE SCREEN RECORDING SETUP
+    let uploadRecorder = null;
+    let proofVideoName = `upload_proof_cycle_${clipNum}_${Date.now()}.mp4`;
+
     try {
+        // Start Video Recording for Proof
+        uploadRecorder = new PuppeteerScreenRecorder(fbPage, { fps: 30 });
+        await uploadRecorder.start(proofVideoName);
+        console.log(`[🎥] Saboot ke liye Screen Recording shuru ho gayi hai: ${proofVideoName}`);
+
         // ==========================================
         // LOGIN PROCESS
         // ==========================================
@@ -429,7 +438,7 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
         }
 
         // ==========================================
-        // STEP 3: VIDEO UPLOAD (WITH SMART WAIT)
+        // STEP 3: VIDEO UPLOAD (WITH EXTENDED WAIT)
         // ==========================================
         console.log("▶️ STEP 3: Video upload kar rahe hain...");
         const photoIconXPath = '//div[@role="dialog"]//div[@aria-label="Photo/video"]';
@@ -444,9 +453,10 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
             
             if (fileInputs.length > 0 && fs.existsSync(videoPath)) {
                 await fileInputs[0].uploadFile(videoPath);
-                console.log(`✅ Video attached (${videoPath}). Process hone ka lamba wait kar rahe hain...`);
-                // 🛑 VIDEO UPLOAD WAIT
-                await new Promise(r => setTimeout(r, 30000)); 
+                
+                // 🛑 YAHAN 60 SECONDS (1 MINUTE) KA WAIT ADD KIYA HAI 🛑
+                console.log(`✅ Video attached (${videoPath}). Process hone ka mukammal 1 MINUTE wait kar rahe hain...`);
+                await new Promise(r => setTimeout(r, 60000)); 
             }
         }
 
@@ -472,7 +482,6 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
         if (postBtn.length > 0) {
             await fbPage.evaluate(el => el.click(), postBtn[0]);
             console.log("✅ 'Post' button daba diya.");
-            // 🛑 Ek aur wait post processing k liye
             await new Promise(r => setTimeout(r, 20000));
         } else {
             const closeEarly = await fbPage.$('div[aria-label="Close"][role="button"]');
@@ -518,6 +527,25 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
         console.log(`⚠️ HOUSTON, WE HAVE A PROBLEM IN UPLOAD: ${e.message}`);
         return false;
     } finally {
+        // 🛑 SABOOT UPLOAD LOGIC 🛑
+        if (uploadRecorder) {
+            console.log(`[🎥] Saboot Recording stop kar rahe hain...`);
+            try { await uploadRecorder.stop(); } catch(e){}
+            
+            if (fs.existsSync(proofVideoName)) {
+                console.log(`[📤 SABOOT] Upload Proof Video GitHub Releases par upload kar raha hoon...`);
+                try {
+                    const tagName = `upload-proof-${Date.now()}`;
+                    execSync(`gh release create ${tagName} "${proofVideoName}" --title "Upload Proof Cycle #${clipNum}" --notes "Facebook web automation upload ka mukammal video saboot."`, { stdio: 'inherit' });
+                    console.log('✅ [+] Successfully uploaded Upload Proof Video to GitHub Releases!');
+                } catch (err) {
+                    console.log(`[❌] Upload proof upload fail ho gaya. Error: ${err.message}`);
+                }
+                // Upload ke baad file delete kar do taake space bache
+                try { fs.unlinkSync(proofVideoName); } catch(e){}
+            }
+        }
+
         console.log("\nFacebook Uploader Browser band kar rahe hain...");
         await fbBrowser.close();
         try { execSync("pkill chrome"); } catch(e){}
@@ -564,7 +592,8 @@ async function main() {
             await worker_0_5_generate_thumbnail(meta.title, thumbFile);
             
             if (await worker_1_2_capture_and_edit(finalVidFile)) {
-                await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc);
+                // Yahan humne clipCounter pass kiya hai taake video ka naam unique ban sake
+                await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc, clipCounter);
             }
         } catch (err) {
             console.error(`\n[!] CRASH DETECTED IN CYCLE #${clipCounter}: ${err.message}`);
