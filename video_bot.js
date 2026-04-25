@@ -1,3 +1,6 @@
+
+// # iss me eek issue hai yeh thumbanil measn caprue full website kar rah ahi 
+
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
