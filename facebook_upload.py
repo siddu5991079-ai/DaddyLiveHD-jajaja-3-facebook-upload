@@ -4,7 +4,6 @@ import time
 from DrissionPage import ChromiumPage, ChromiumOptions
 
 def login_and_post():
-    # Node.js se data (video, text) read karna
     if not os.path.exists('post_data.json'):
         print("❌ Error: post_data.json nahi mila!")
         return
@@ -44,14 +43,17 @@ def login_and_post():
     co.set_argument('--disable-logging')
     co.set_argument('--mute-audio')
     
-    print("🚀 Script Start... Browser khul raha hai...")
+    # 🛑 YEH LINE ZAROORI HAI: Taake Python logs foran screen par show kare
+    os.environ['PYTHONUNBUFFERED'] = '1'
+    
+    print("🚀 Script Start... Browser khul raha hai...", flush=True)
     page = ChromiumPage(co)
 
     try:
         # ==========================================
         # LOGIN PROCESS
         # ==========================================
-        print("🌐 Facebook par ja rahe hain...")
+        print("🌐 Facebook par ja rahe hain...", flush=True)
         page.get("https://www.facebook.com/404") 
         time.sleep(3)
 
@@ -68,39 +70,41 @@ def login_and_post():
         time.sleep(5)
         
         if "log in" in page.title.lower() or "login" in page.title.lower():
-            print("❌ Login Failed! Cookies expire ho chuki hain.")
+            print("❌ Login Failed! Cookies expire ho chuki hain.", flush=True)
             return
         
-        print("✅ Login Successful!")
+        print("✅ Login Successful!", flush=True)
 
         # ==========================================
-        # 🛑 25 MINUTES SESSION WAIT (USER REQUEST)
+        # 🛑 25 SECONDS SESSION WAIT (LIVE COUNTDOWN)
         # ==========================================
-        print("⏳ Session stabilize karne ke liye 25 MINUTES (1500 seconds) ka wait shuru...")
-        time.sleep(1500)
-        print("✅ 25 Minutes poore ho gaye! Aage barh rahe hain...")
+        print("⏳ Session stabilize karne ke liye 25 SECONDS ka wait shuru...", flush=True)
+        for i in range(25, 0, -1):
+            if i % 5 == 0 or i <= 3: # Har 5 second baad aur aakhri 3 seconds mein print karega
+                print(f"⏳ Wait chal raha hai... {i} seconds baqi hain.", flush=True)
+            time.sleep(1) # Har loop mein 1 second ka wait
+        print("✅ 25 Seconds poore ho gaye! Aage barh rahe hain...", flush=True)
 
         # ==========================================
         # 🧠 SMART WAIT: PAGE LOAD CHECK
         # ==========================================
-        print("⏳ Wait kar rahe hain taake page aur post box puri tarah load ho jaye...")
+        print("⏳ Wait kar rahe hain taake page aur post box puri tarah load ho jaye...", flush=True)
         page.wait.load_start() 
         time.sleep(5)
         
-        # EXACT LOCAL XPATH JO AAPNE DIYA THA
         post_box_xpath = 'xpath://div[contains(@aria-label, "What\'s on your mind") or contains(@aria-label, "Create a post")]'
         
         if page.wait.ele_displayed(post_box_xpath, timeout=15):
-            print("✅ Page 100% loaded! Post box screen par aagaya hai.")
+            print("✅ Page 100% loaded! Post box screen par aagaya hai.", flush=True)
             time.sleep(2) 
         else:
-            print("❌ Timeout: Post box screen par nahi aaya.")
+            print("❌ Timeout: Post box screen par nahi aaya.", flush=True)
             return
 
         # ==========================================
-        # STEP 1: CREATE POST POPUP KHOLNA (EXACT OLD LOGIC)
+        # STEP 1: CREATE POST POPUP KHOLNA
         # ==========================================
-        print("▶️ STEP 1: 'What's on your mind?' wale box par click kar rahe hain...")
+        print("▶️ STEP 1: 'What's on your mind?' wale box par click kar rahe hain...", flush=True)
         create_post_btn = page.ele(post_box_xpath)
         
         if create_post_btn:
@@ -109,34 +113,34 @@ def login_and_post():
             
             dialog_box = page.ele('xpath://div[@role="dialog"]', timeout=3)
             if not dialog_box:
-                print("⚠️ Normal click se popup nahi khula! JS click try kar rahe hain...")
+                print("⚠️ Normal click se popup nahi khula! JS click try kar rahe hain...", flush=True)
                 create_post_btn.click(by_js=True)
                 time.sleep(4)
                 
                 if not page.ele('xpath://div[@role="dialog"]'):
-                    print("❌ ERROR: Popup open nahi ho raha! Script rok di gayi hai.")
+                    print("❌ ERROR: Popup open nahi ho raha! Script rok di gayi hai.", flush=True)
                     return
         else:
-            print("❌ Box select nahi ho saka.")
+            print("❌ Box select nahi ho saka.", flush=True)
             return
 
         # ==========================================
         # STEP 2: TEXT TYPE KARNA
         # ==========================================
-        print("▶️ STEP 2: Text box mein likh rahe hain...")
+        print("▶️ STEP 2: Text box mein likh rahe hain...", flush=True)
         text_box = page.ele('xpath://div[@role="dialog"]//div[@role="textbox" and @contenteditable="true"]', timeout=5)
         if text_box:
             text_box.input(post_text)
-            print("✅ Text type ho gaya.")
+            print("✅ Text type ho gaya.", flush=True)
             time.sleep(3)
         else:
-            print("❌ Text box dialog mein nahi mila.")
+            print("❌ Text box dialog mein nahi mila.", flush=True)
             return
 
         # ==========================================
         # STEP 3: IMAGE/VIDEO UPLOAD
         # ==========================================
-        print("▶️ STEP 3: Video upload kar rahe hain...")
+        print("▶️ STEP 3: Video upload kar rahe hain...", flush=True)
         photo_icon = page.ele('xpath://div[@role="dialog"]//div[@aria-label="Photo/video"]', timeout=5)
         if photo_icon:
             photo_icon.click(by_js=True)
@@ -146,13 +150,13 @@ def login_and_post():
                 file_input = page.ele('xpath://div[@role="dialog"]//input[@type="file"]')
                 if file_input:
                     file_input.input(video_path)
-                    print("✅ Video attached. Upload hone ka 1 MINUTE wait kar rahe hain...")
+                    print("✅ Video attached. Upload hone ka 1 MINUTE wait kar rahe hain...", flush=True)
                     time.sleep(60)
 
         # ==========================================
         # STEP 4: NEXT BUTTON
         # ==========================================
-        print("▶️ STEP 4: Next button daba rahe hain...")
+        print("▶️ STEP 4: Next button daba rahe hain...", flush=True)
         next_btn = page.ele('css:div[aria-label="Next"][role="button"]', timeout=3)
         if next_btn:
             next_btn.click(by_js=True)
@@ -161,11 +165,11 @@ def login_and_post():
         # ==========================================
         # STEP 4.5: POST BUTTON
         # ==========================================
-        print("▶️ STEP 4.5: Post button ya popup check kar rahe hain...")
+        print("▶️ STEP 4.5: Post button ya popup check kar rahe hain...", flush=True)
         post_btn = page.ele('xpath://div[@aria-label="Post" and @role="button"]', timeout=3) or page.ele('xpath://span[text()="Post"]', timeout=2)
         if post_btn:
             post_btn.click(by_js=True)
-            print("✅ 'Post' button daba diya. 20 Seconds wait...")
+            print("✅ 'Post' button daba diya. 20 Seconds wait...", flush=True)
             time.sleep(20)
         else:
             close_early = page.ele('css:div[aria-label="Close"][role="button"]', timeout=3)
@@ -184,22 +188,22 @@ def login_and_post():
         # ==========================================
         # STEP 5: FINAL "SHARE NOW" BUTTON
         # ==========================================
-        print("▶️ STEP 5: Final Share button dhoond rahe hain...")
+        print("▶️ STEP 5: Final Share button dhoond rahe hain...", flush=True)
         share_now_btn = page.ele('css:div[aria-label="Share now"][role="button"]', timeout=3) or page.ele('xpath://span[text()="Share now" or text()="Publish" or text()="Share"]', timeout=2)
         if share_now_btn:
             share_now_btn.click(by_js=True)
-            print("🎉 BINGO! Facebook Post 100% Successful.")
+            print("🎉 BINGO! Facebook Post 100% Successful.", flush=True)
             time.sleep(15)
         
         time.sleep(5) 
 
     except Exception as e:
-        print(f"⚠️ HOUSTON, WE HAVE A PROBLEM: {e}")
+        print(f"⚠️ HOUSTON, WE HAVE A PROBLEM: {e}", flush=True)
     finally:
-        print("\nBrowser band kar rahe hain...")
+        print("\nBrowser band kar rahe hain...", flush=True)
         page.quit()
         os.system("pkill chrome")
-        print("✅ Browser successfully khatam ho gaya!")
+        print("✅ Browser successfully khatam ho gaya!", flush=True)
 
 if __name__ == "__main__":
     login_and_post()
