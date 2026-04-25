@@ -18,7 +18,7 @@ on:
       target_url:
         description: 'Target Website URL'
         required: true
-        default: 'https://dlstreams.com/watch.php?id=316'
+        default: 'https://dlstreams.com/watch.php?id=598'
 
 permissions:
   contents: write
