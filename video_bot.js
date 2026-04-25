@@ -304,7 +304,6 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
 
     console.log("🚀 Script Start... Browser khul raha hai...");
     
-    // Project 1 wale exact Stealth Flags
     const fbBrowser = await puppeteer.launch({
         channel: 'chrome', headless: false,
         defaultViewport: { width: 1920, height: 1080 },
@@ -318,7 +317,6 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
     });
 
     const fbPage = await fbBrowser.newPage();
-    // Project 1 User Agent
     await fbPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
     try {
@@ -347,7 +345,7 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
         // SMART WAIT: PAGE LOAD CHECK
         // ==========================================
         console.log("⏳ Wait kar rahe hain taake page aur post box puri tarah load ho jaye...");
-        await new Promise(r => setTimeout(r, 5000)); // Xvfb rendering buffer
+        await new Promise(r => setTimeout(r, 5000)); 
 
         const postBoxXPath = '//div[contains(@aria-label, "What\'s on your mind") or contains(@aria-label, "Create a post") or contains(@aria-label, "Write something")]';
         
@@ -383,7 +381,6 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
                     await box.click();
                     await new Promise(r => setTimeout(r, 5000));
 
-                    // Check popup
                     let dialog = await fbPage.$x('//div[@role="dialog"]');
                     if (dialog.length > 0) {
                         popupOpened = true;
@@ -423,7 +420,6 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
         
         const textBoxes = await fbPage.$x(textBoxXPath);
         if (textBoxes.length > 0) {
-            // Hum yahan wohi dynamic text daal rahe hain jo Project 10 ne banaya hai
             await textBoxes[0].type(desc, { delay: 10 }); 
             console.log("✅ Text type ho gaya.");
             await new Promise(r => setTimeout(r, 3000));
@@ -449,7 +445,7 @@ async function worker_3_upload(videoPath, thumbPath, title, desc) {
             if (fileInputs.length > 0 && fs.existsSync(videoPath)) {
                 await fileInputs[0].uploadFile(videoPath);
                 console.log(`✅ Video attached (${videoPath}). Process hone ka lamba wait kar rahe hain...`);
-                // 🛑 YEH BOHAT ZAROORI HAI: Video ko upload hone mein time lagta hai
+                // 🛑 VIDEO UPLOAD WAIT
                 await new Promise(r => setTimeout(r, 30000)); 
             }
         }
@@ -568,7 +564,6 @@ async function main() {
             await worker_0_5_generate_thumbnail(meta.title, thumbFile);
             
             if (await worker_1_2_capture_and_edit(finalVidFile)) {
-                // Ab yeh API ke bajaye Web Browser use kar k upload karega
                 await worker_3_upload(finalVidFile, thumbFile, meta.title, meta.desc);
             }
         } catch (err) {
